@@ -18,6 +18,9 @@
       "path": "../../util/brand"
     },
     {
+      "path": "../../storage/storage-domain"
+    },
+    {
       "path": "../supramas-domain"
     },
     {

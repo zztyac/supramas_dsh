@@ -3,6 +3,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool, type ValueSchemaSpec } from '@deepseek-ai/dsh-tools'
 import {
+  RUN_PHASES,
   SOURCE_TYPES,
   SupraMasDomainError,
   SupraMasError,
@@ -32,6 +33,7 @@ interface ToolEnvelope {
   artifacts: string[]
   data?: {
     run?: RunSnapshot
+    runs?: RunSnapshot[]
     paper?: PaperSummary
     chunk?: ToolEvidenceChunk
     artifact?: ToolPaperArtifact
@@ -80,6 +82,30 @@ const paperSummarySchema = {
   },
 } as const satisfies ValueSchemaSpec
 
+const runSchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    id: { type: 'string', required: true },
+    jobId: { type: 'string', required: true },
+    revision: { type: 'integer', required: true },
+    phase: { type: 'string', required: true, enum: RUN_PHASES },
+    inputTaskPath: { type: 'string', required: true },
+    runDir: { type: 'string', required: true },
+    createdAt: { type: 'integer', required: true },
+    updatedAt: { type: 'integer', required: true },
+    failure: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        code: { type: 'string', required: true },
+        message: { type: 'string', required: true },
+        retryable: { type: 'boolean', required: true },
+      },
+    },
+  },
+} as const satisfies ValueSchemaSpec
+
 const outputSchema = {
   type: 'object',
   additionalProperties: false,
@@ -92,43 +118,8 @@ const outputSchema = {
       type: 'object',
       additionalProperties: false,
       properties: {
-        run: {
-          type: 'object',
-          additionalProperties: false,
-          properties: {
-            id: { type: 'string', required: true },
-            jobId: { type: 'string', required: true },
-            revision: { type: 'integer', required: true },
-            phase: {
-              type: 'string',
-              required: true,
-              enum: [
-                'created',
-                'clarifying',
-                'task_ready',
-                'running',
-                'validating',
-                'completed',
-                'recoverable_failed',
-                'failed',
-                'cancelled',
-              ],
-            },
-            inputTaskPath: { type: 'string', required: true },
-            runDir: { type: 'string', required: true },
-            createdAt: { type: 'integer', required: true },
-            updatedAt: { type: 'integer', required: true },
-            failure: {
-              type: 'object',
-              additionalProperties: false,
-              properties: {
-                code: { type: 'string', required: true },
-                message: { type: 'string', required: true },
-                retryable: { type: 'boolean', required: true },
-              },
-            },
-          },
-        },
+        run: runSchema,
+        runs: { type: 'array', items: runSchema },
         paper: paperSummarySchema,
         chunk: chunkSchema,
         artifact: {
@@ -257,9 +248,9 @@ function domainError(error: SupraMasError | SupraMasDomainError): ToolEnvelope {
   }
 }
 
-function guard(action: () => ToolEnvelope): ToolEnvelope {
+async function guard(action: () => ToolEnvelope | Promise<ToolEnvelope>): Promise<ToolEnvelope> {
   try {
-    return action()
+    return await action()
   } catch (error) {
     if (error instanceof SupraMasError || error instanceof SupraMasDomainError) return domainError(error)
     throw error
@@ -300,8 +291,8 @@ export function apply(ctx: Context): void {
     },
     output,
     async execute(args) {
-      return guard(() => {
-        const run = ctx.supramas.create({
+      return guard(async () => {
+        const run = await ctx.supramas.create({
           jobId: args.job_id,
           inputTaskPath: args.input_task_path,
           runDir: args.run_dir,
@@ -312,6 +303,27 @@ export function apply(ctx: Context): void {
           next_actions: ['prepare_input_task'],
           artifacts: [run.inputTaskPath, run.runDir],
           data: { run },
+        }
+      })
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'supramas_run_list',
+    description: 'List all durable SupraMAS runs in stable creation order for discovery and recovery.',
+    parameters: {},
+    output,
+    async execute() {
+      return guard(() => {
+        const runs = ctx.supramas.list()
+        return {
+          status: 'success',
+          summary: runs.length === 0
+            ? 'No SupraMAS runs are available.'
+            : `Loaded ${runs.length} SupraMAS run(s).`,
+          next_actions: runs.length === 0 ? ['create_run'] : ['inspect_or_resume_run'],
+          artifacts: [...new Set(runs.flatMap(run => [run.inputTaskPath, run.runDir]))],
+          data: { runs },
         }
       })
     },
@@ -342,6 +354,56 @@ export function apply(ctx: Context): void {
   }))
 
   ctx.tools.register(defineTool({
+    name: 'supramas_run_transition',
+    description: 'Advance or resume one durable SupraMAS run with compare-and-set revision protection.',
+    parameters: {
+      run_id: { type: 'string', required: true, description: 'Deterministic run id such as supramas:demo.' },
+      revision: { type: 'integer', required: true, description: 'Exact current revision returned by list or get.' },
+      phase: { type: 'string', required: true, enum: RUN_PHASES, description: 'Requested next durable lifecycle phase.' },
+      failure_code: { type: 'string', description: 'Stable failure code; required for a failed phase.' },
+      failure_message: { type: 'string', description: 'Actionable failure detail; required for a failed phase.' },
+      failure_retryable: { type: 'boolean', description: 'Whether an operator may safely resume this failure.' },
+    },
+    output,
+    async execute(args) {
+      return guard(async () => {
+        const hasFailure = args.failure_code !== undefined
+          || args.failure_message !== undefined
+          || args.failure_retryable !== undefined
+        const run = await ctx.supramas.transition(
+          { id: SupraMasRunId(args.run_id), revision: args.revision },
+          {
+            phase: args.phase,
+            ...(hasFailure
+              ? {
+                failure: {
+                  code: args.failure_code ?? '',
+                  message: args.failure_message ?? '',
+                  retryable: args.failure_retryable ?? false,
+                },
+              }
+              : {}),
+          },
+        )
+        const nextActions = run.phase === 'completed'
+          ? ['read_outputs']
+          : run.phase === 'recoverable_failed'
+            ? ['inspect_failure_and_resume']
+            : run.phase === 'failed' || run.phase === 'cancelled'
+              ? ['stop_run']
+              : ['continue_run']
+        return {
+          status: 'success',
+          summary: `Transitioned SupraMAS run ${run.jobId} to ${run.phase}.`,
+          next_actions: nextActions,
+          artifacts: [run.inputTaskPath, run.runDir],
+          data: { run },
+        }
+      })
+    },
+  }))
+
+  ctx.tools.register(defineTool({
     name: 'supramas_paper_store',
     description: 'Register one verified paper artifact at its canonical run-local papers path.',
     parameters: {
@@ -353,8 +415,8 @@ export function apply(ctx: Context): void {
     },
     output,
     async execute(args) {
-      return guard(() => {
-        const artifact = ctx.supramas.storePaper(SupraMasRunId(args.run_id), {
+      return guard(async () => {
+        const artifact = await ctx.supramas.storePaper(SupraMasRunId(args.run_id), {
           paper_id: args.paper_id,
           paper_title: args.paper_title,
           local_path: args.local_path,
@@ -383,9 +445,9 @@ export function apply(ctx: Context): void {
     },
     output,
     async execute(args) {
-      return guard(() => {
+      return guard(async () => {
         const runId = SupraMasRunId(args.run_id)
-        const chunk = ctx.supramas.addEvidenceChunk(runId, args.paper_id, {
+        const chunk = await ctx.supramas.addEvidenceChunk(runId, args.paper_id, {
           chunk_id: args.chunk_id,
           ...(args.page === undefined ? {} : { page: args.page }),
           text: args.text,

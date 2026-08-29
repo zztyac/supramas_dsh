@@ -20,13 +20,13 @@ export const ROLE_SPECS: readonly RoleSpec[] = [
   {
     id: 'task-setup',
     purpose: 'Clarify a research request and create one approved input task.',
-    tools: ['ask_user_question', 'supramas_run_create', 'supramas_run_get'],
+    tools: ['ask_user_question', 'supramas_run_create', 'supramas_run_list', 'supramas_run_get'],
     outputSchema: 'supramas.task-setup.v1',
   },
   {
     id: 'strategy-coordinator',
     purpose: 'Advance the deterministic Stage 1 run and delegate bounded work.',
-    tools: ['supramas_run_get', 'subagent', 'subagent_control'],
+    tools: ['supramas_run_list', 'supramas_run_get', 'supramas_run_transition', 'subagent', 'subagent_control'],
     outputSchema: 'supramas.coordinator.v1',
   },
   {

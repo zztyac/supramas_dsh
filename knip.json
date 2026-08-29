@@ -739,6 +739,33 @@
         "@deepseek-ai/.+"
       ]
     },
+    "packages/bundle/supramas": {
+      "entry": [
+        "tests/**/*.spec.ts"
+      ],
+      "project": [
+        "src/**/*.ts",
+        "tests/**/*.ts"
+      ],
+      "ignoreDependencies": [
+        "@deepseek-ai/dsh-supramas",
+        "@deepseek-ai/dsh-tool-supramas"
+      ]
+    },
+    "packages/preset/agent-presets": {
+      "entry": [
+        "tests/**/*.spec.ts",
+        "tests/fixtures/**/*.js"
+      ],
+      "project": [
+        "src/**/*.ts",
+        "tests/**/*.ts",
+        "tests/**/*.js"
+      ],
+      "ignoreDependencies": [
+        "@deepseek-ai/dsh-tool-supramas"
+      ]
+    },
     "packages/bundle/headless": {
       "ignoreDependencies": [
         "@deepseek-ai/dsh-code-runtime-worker-thread"

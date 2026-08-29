@@ -1,20 +1,65 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
+import Storage from '@deepseek-ai/dsh-storage'
+import {
+  apply as storageJsonApply,
+  Config as storageJsonConfig,
+  inject as storageJsonInject,
+  name as storageJsonName,
+} from '@deepseek-ai/dsh-storage-json'
+import {
+  apply as storageDomainApply,
+  Config as storageDomainConfig,
+  inject as storageDomainInject,
+  name as storageDomainName,
+} from '@deepseek-ai/dsh-storage-domain'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import SupraMasRuntime from '../../supramas/src/index.ts'
 import * as ToolSupraMas from '../src/index.ts'
 
 async function setup(): Promise<Context> {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-evidence-tools-'))
+  roots.push(root)
   const ctx = new Context()
+  contexts.push(ctx)
+  await ctx.plugin(Storage)
+  await ctx.plugin({
+    name: storageJsonName,
+    inject: storageJsonInject,
+    apply: storageJsonApply,
+    Config: storageJsonConfig,
+  }, { root })
+  await ctx.plugin({
+    name: storageDomainName,
+    inject: storageDomainInject,
+    apply: storageDomainApply,
+    Config: storageDomainConfig,
+  }, { backend: 'json' })
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
   await ctx.plugin(SupraMasRuntime)
   await ctx.plugin(ToolSupraMas)
-  ctx.supramas.create({ jobId: 'demo', inputTaskPath: 'runs/demo/input_task.yaml', runDir: 'runs/demo' })
+  await ctx.supramas.create({ jobId: 'demo', inputTaskPath: 'runs/demo/input_task.yaml', runDir: 'runs/demo' })
   return ctx
 }
+
+const contexts: Context[] = []
+const roots: string[] = []
+
+afterEach(async () => {
+  await Promise.all(contexts.splice(0).map(ctx => ctx.fiber.dispose()))
+  await Promise.all(roots.splice(0).map(root => rm(root, {
+    recursive: true,
+    force: true,
+    maxRetries: 10,
+    retryDelay: 100,
+  })))
+})
 
 let callId = 0
 function call(ctx: Context, name: string, args: unknown) {

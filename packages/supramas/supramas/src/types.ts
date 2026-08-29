@@ -11,17 +11,21 @@ export interface RunRef {
   readonly revision: number
 }
 
+/** Closed durable lifecycle phases of a material-science run. */
+export const RUN_PHASES = [
+  'created',
+  'clarifying',
+  'task_ready',
+  'running',
+  'validating',
+  'completed',
+  'recoverable_failed',
+  'failed',
+  'cancelled',
+] as const
+
 /** Durable lifecycle phase of a material-science run. */
-export type RunPhase =
-  | 'created'
-  | 'clarifying'
-  | 'task_ready'
-  | 'running'
-  | 'validating'
-  | 'completed'
-  | 'recoverable_failed'
-  | 'failed'
-  | 'cancelled'
+export type RunPhase = typeof RUN_PHASES[number]
 
 /** Structured failure retained on failed run revisions. */
 export interface RunFailure {

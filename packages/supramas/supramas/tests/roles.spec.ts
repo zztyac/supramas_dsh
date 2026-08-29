@@ -16,9 +16,21 @@ describe('SupraMAS role contracts', () => {
     expect(role.tools).toEqual([
       'ask_user_question',
       'supramas_run_create',
+      'supramas_run_list',
       'supramas_run_get',
     ])
     expect(role.outputSchema).toBe('supramas.task-setup.v1')
+  })
+
+  it('lets the coordinator discover and compare-and-set durable runs', () => {
+    const role = resolveRole('strategy-coordinator')
+    expect(role.tools).toEqual([
+      'supramas_run_list',
+      'supramas_run_get',
+      'supramas_run_transition',
+      'subagent',
+      'subagent_control',
+    ])
   })
 
   it('separates builder mutation tools from reviewer read-only tools', () => {

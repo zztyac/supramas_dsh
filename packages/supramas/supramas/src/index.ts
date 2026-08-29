@@ -1,6 +1,7 @@
 /** Material-science run registry with compare-and-set lifecycle transitions. */
 
 import { Context, Service } from '@deepseek-ai/cordis'
+import type { KvTable } from '@deepseek-ai/dsh-storage-domain'
 import {
   EvidenceCatalog,
   type EvidenceChunk,
@@ -9,6 +10,7 @@ import {
   type PaperArtifact,
   type PaperArtifactMetadata,
 } from '@deepseek-ai/dsh-supramas-domain'
+import { supraMasDomainSpec, type SupraMasRunRecord } from './spec.ts'
 import type {
   CreateRunRequest,
   RunFailure,
@@ -21,7 +23,17 @@ import type {
 } from './types.ts'
 
 export type * from './types.ts'
+export { RUN_PHASES } from './types.ts'
 export type * from './roles.ts'
+export {
+  supraMasDomainSpec,
+  supraMasEvidenceChunk,
+  supraMasPaperArtifact,
+  supraMasRunFailure,
+  supraMasRunRecord,
+  supraMasRunSnapshot,
+} from './spec.ts'
+export type { SupraMasRunRecord } from './spec.ts'
 export { ROLE_SPECS, resolveRole } from './roles.ts'
 export type * from '@deepseek-ai/dsh-supramas-domain'
 export {
@@ -94,6 +106,20 @@ function cloneRun(run: RunSnapshot): RunSnapshot {
   return run.failure === undefined ? base : { ...base, failure: { ...run.failure } }
 }
 
+function runFromStored(run: SupraMasRunRecord['snapshot']): RunSnapshot {
+  const snapshot: Omit<RunSnapshot, 'failure'> = {
+    id: run.id,
+    jobId: run.jobId,
+    revision: run.revision,
+    phase: run.phase,
+    inputTaskPath: run.inputTaskPath,
+    runDir: run.runDir,
+    createdAt: run.createdAt,
+    updatedAt: run.updatedAt,
+  }
+  return run.failure === undefined ? snapshot : { ...snapshot, failure: { ...run.failure } }
+}
+
 function normalizePath(value: string): string {
   return value.replaceAll('\\', '/').replace(/\/$/, '')
 }
@@ -135,13 +161,87 @@ function resolveFailure(phase: RunPhase, failure: RunFailure | undefined): RunFa
   return { code: failure.code, message: failure.message.trim(), retryable: failure.retryable }
 }
 
-/** Process-local material-science run registry. Later persistence providers consume the same API. */
+function catalogFromRecord(record: SupraMasRunRecord): EvidenceCatalog {
+  const catalog = new EvidenceCatalog(record.snapshot.jobId)
+  for (const [paperId, paper] of Object.entries(record.papers)) {
+    if (paperId !== paper.paper_id) {
+      throw new Error(`SupraMAS paper key ${paperId} does not match artifact ${paper.paper_id}`)
+    }
+    catalog.storePaper({
+      paper_id: paper.paper_id,
+      paper_title: paper.paper_title,
+      local_path: paper.local_path,
+      source_type: paper.source_type,
+    })
+    for (const chunk of paper.chunks) {
+      catalog.addChunk(paper.paper_id, {
+        chunk_id: chunk.chunk_id,
+        text: chunk.text,
+        ...(chunk.page === undefined ? {} : { page: chunk.page }),
+      })
+    }
+  }
+  return catalog
+}
+
+/** Durable material-science run registry over the DSH storage-domain form. */
 export class SupraMasRuntime extends Service {
-  private readonly runs = new Map<SupraMasRunIdBrand, RunSnapshot>()
+  static inject = ['storageDomain']
+
+  private table?: KvTable<SupraMasRunIdBrand, SupraMasRunRecord>
   private readonly evidence = new Map<SupraMasRunIdBrand, EvidenceCatalog>()
+  private nextSequence = 0
+  private operationTail: Promise<void> = Promise.resolve()
 
   constructor(ctx: Context) {
     super(ctx, 'supramas')
+  }
+
+  /** Open durable state, validate provenance, and mark interrupted work recoverable. */
+  protected async [Service.init](): Promise<void> {
+    const domain = await this.ctx.storageDomain.open(supraMasDomainSpec)
+    this.ctx.effect(() => () => domain.close(), 'supramas.domainClose')
+    this.table = domain.table('runs')
+    for (const [id, stored] of this.table.entries()) {
+      if (stored.snapshot.id !== id || id !== SupraMasRunId(`supramas:${stored.snapshot.jobId}`)) {
+        throw new Error(`SupraMAS durable run key ${id} does not match its snapshot identity`)
+      }
+      resolveCreate({
+        jobId: stored.snapshot.jobId,
+        inputTaskPath: stored.snapshot.inputTaskPath,
+        runDir: stored.snapshot.runDir,
+      })
+      this.nextSequence = Math.max(this.nextSequence, stored.sequence + 1)
+      this.evidence.set(id, catalogFromRecord(stored))
+      if (stored.snapshot.phase === 'running' || stored.snapshot.phase === 'validating') {
+        const recovered: SupraMasRunRecord = {
+          ...stored,
+          snapshot: {
+            ...runBase(runFromStored(stored.snapshot)),
+            revision: stored.snapshot.revision + 1,
+            phase: 'recoverable_failed',
+            updatedAt: Math.max(Date.now(), stored.snapshot.updatedAt),
+            failure: {
+              code: 'process-restarted',
+              message: `Process restarted while run ${id} was ${stored.snapshot.phase}.`,
+              retryable: true,
+            },
+          },
+        }
+        await this.table.put(id, recovered)
+      }
+    }
+  }
+
+  private requireTable(): KvTable<SupraMasRunIdBrand, SupraMasRunRecord> {
+    if (this.table === undefined) throw new Error('SupraMAS runtime is not started yet')
+    return this.table
+  }
+
+  private enqueue<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.operationTail.then(operation)
+    this.operationTail = result.then(() => {}, () => {})
+    return result
   }
 
   /**
@@ -149,30 +249,41 @@ export class SupraMasRuntime extends Service {
    * @param request - Job identity and canonical run-local paths.
    * @returns a detached initial snapshot.
    */
-  create(request: CreateRunRequest): RunSnapshot {
-    const spec = resolveCreate(request)
-    const id = SupraMasRunId(`supramas:${spec.jobId}`)
-    if (this.runs.has(id)) {
-      throw new SupraMasError(`SupraMAS run ${spec.jobId} already exists`, 'SUPRAMAS_RUN_EXISTS')
-    }
-    const now = Date.now()
-    const run: RunSnapshot = {
-      id,
-      jobId: spec.jobId,
-      revision: 1,
-      phase: 'created',
-      inputTaskPath: spec.inputTaskPath,
-      runDir: spec.runDir,
-      createdAt: now,
-      updatedAt: now,
-    }
-    this.runs.set(id, run)
-    this.evidence.set(id, new EvidenceCatalog(spec.jobId))
-    return cloneRun(run)
+  create(request: CreateRunRequest): Promise<RunSnapshot> {
+    return this.enqueue(async () => {
+      const spec = resolveCreate(request)
+      const id = SupraMasRunId(`supramas:${spec.jobId}`)
+      const table = this.requireTable()
+      if (table.get(id) !== undefined) {
+        throw new SupraMasError(`SupraMAS run ${spec.jobId} already exists`, 'SUPRAMAS_RUN_EXISTS')
+      }
+      const now = Date.now()
+      const run: RunSnapshot = {
+        id,
+        jobId: spec.jobId,
+        revision: 1,
+        phase: 'created',
+        inputTaskPath: spec.inputTaskPath,
+        runDir: spec.runDir,
+        createdAt: now,
+        updatedAt: now,
+      }
+      const record: SupraMasRunRecord = {
+        sequence: this.nextSequence,
+        snapshot: run,
+        papers: {},
+      }
+      await table.put(id, record)
+      this.nextSequence += 1
+      this.evidence.set(id, new EvidenceCatalog(spec.jobId))
+      return cloneRun(run)
+    })
   }
 
   private evidenceFor(id: SupraMasRunIdBrand): EvidenceCatalog {
-    if (!this.runs.has(id)) throw new SupraMasError(`SupraMAS run ${id} does not exist`, 'SUPRAMAS_RUN_NOT_FOUND')
+    if (this.requireTable().get(id) === undefined) {
+      throw new SupraMasError(`SupraMAS run ${id} does not exist`, 'SUPRAMAS_RUN_NOT_FOUND')
+    }
     const catalog = this.evidence.get(id)
     if (catalog === undefined) throw new Error(`SupraMAS evidence catalog missing for ${id}`)
     return catalog
@@ -184,8 +295,22 @@ export class SupraMasRuntime extends Service {
    * @param metadata - Canonical run-local paper metadata.
    * @returns a detached empty artifact.
    */
-  storePaper(id: SupraMasRunIdBrand, metadata: PaperArtifactMetadata): PaperArtifact {
-    return this.evidenceFor(id).storePaper(metadata)
+  storePaper(id: SupraMasRunIdBrand, metadata: PaperArtifactMetadata): Promise<PaperArtifact> {
+    return this.enqueue(async () => {
+      const table = this.requireTable()
+      const current = table.get(id)
+      if (current === undefined) {
+        throw new SupraMasError(`SupraMAS run ${id} does not exist`, 'SUPRAMAS_RUN_NOT_FOUND')
+      }
+      const catalog = catalogFromRecord(current)
+      const artifact = catalog.storePaper(metadata)
+      await table.put(id, {
+        ...current,
+        papers: { ...current.papers, [artifact.paper_id]: artifact },
+      })
+      this.evidence.set(id, catalog)
+      return artifact
+    })
   }
 
   /**
@@ -195,8 +320,24 @@ export class SupraMasRuntime extends Service {
    * @param chunk - Local page-aware evidence text.
    * @returns a detached stored chunk.
    */
-  addEvidenceChunk(id: SupraMasRunIdBrand, paperId: string, chunk: EvidenceChunk): EvidenceChunk {
-    return this.evidenceFor(id).addChunk(paperId, chunk)
+  addEvidenceChunk(id: SupraMasRunIdBrand, paperId: string, chunk: EvidenceChunk): Promise<EvidenceChunk> {
+    return this.enqueue(async () => {
+      const table = this.requireTable()
+      const current = table.get(id)
+      if (current === undefined) {
+        throw new SupraMasError(`SupraMAS run ${id} does not exist`, 'SUPRAMAS_RUN_NOT_FOUND')
+      }
+      const catalog = catalogFromRecord(current)
+      const stored = catalog.addChunk(paperId, chunk)
+      const paper = catalog.getPaper(paperId)
+      if (paper === undefined) throw new Error(`SupraMAS paper ${paperId} disappeared after chunk storage`)
+      await table.put(id, {
+        ...current,
+        papers: { ...current.papers, [paperId]: paper },
+      })
+      this.evidence.set(id, catalog)
+      return stored
+    })
   }
 
   /**
@@ -226,8 +367,8 @@ export class SupraMasRuntime extends Service {
    * @returns a detached snapshot or `undefined` when absent.
    */
   get(id: SupraMasRunIdBrand): RunSnapshot | undefined {
-    const run = this.runs.get(id)
-    return run === undefined ? undefined : cloneRun(run)
+    const record = this.requireTable().get(id)
+    return record === undefined ? undefined : runFromStored(record.snapshot)
   }
 
   /**
@@ -235,7 +376,9 @@ export class SupraMasRuntime extends Service {
    * @returns detached snapshots in creation order.
    */
   list(): RunSnapshot[] {
-    return [...this.runs.values()].map(cloneRun)
+    return [...this.requireTable().entries()]
+      .sort(([, left], [, right]) => left.sequence - right.sequence)
+      .map(([, record]) => runFromStored(record.snapshot))
   }
 
   /**
@@ -244,34 +387,38 @@ export class SupraMasRuntime extends Service {
    * @param request - Next phase and required failure details.
    * @returns the detached committed snapshot.
    */
-  transition(ref: RunRef, request: TransitionRunRequest): RunSnapshot {
-    const current = this.runs.get(ref.id)
-    if (current === undefined) {
-      throw new SupraMasError(`SupraMAS run ${ref.id} does not exist`, 'SUPRAMAS_RUN_NOT_FOUND')
-    }
-    if (current.revision !== ref.revision) {
-      throw new SupraMasError(
-        `stale run revision ${ref.revision}; current revision is ${current.revision}`,
-        'SUPRAMAS_STALE_REVISION',
-      )
-    }
-    if (!TRANSITIONS[current.phase].includes(request.phase)) {
-      throw new SupraMasError(
-        `cannot transition run ${current.id} from ${current.phase} to ${request.phase}`,
-        'SUPRAMAS_INVALID_TRANSITION',
-      )
-    }
-    const failure = resolveFailure(request.phase, request.failure)
-    const base = runBase(current)
-    const updated: RunSnapshot = {
-      ...base,
-      revision: current.revision + 1,
-      phase: request.phase,
-      updatedAt: Math.max(Date.now(), current.updatedAt),
-      ...failure === undefined ? {} : { failure },
-    }
-    this.runs.set(ref.id, updated)
-    return cloneRun(updated)
+  transition(ref: RunRef, request: TransitionRunRequest): Promise<RunSnapshot> {
+    return this.enqueue(async () => {
+      const table = this.requireTable()
+      const record = table.get(ref.id)
+      if (record === undefined) {
+        throw new SupraMasError(`SupraMAS run ${ref.id} does not exist`, 'SUPRAMAS_RUN_NOT_FOUND')
+      }
+      const current = runFromStored(record.snapshot)
+      if (current.revision !== ref.revision) {
+        throw new SupraMasError(
+          `stale run revision ${ref.revision}; current revision is ${current.revision}`,
+          'SUPRAMAS_STALE_REVISION',
+        )
+      }
+      if (!TRANSITIONS[current.phase].includes(request.phase)) {
+        throw new SupraMasError(
+          `cannot transition run ${current.id} from ${current.phase} to ${request.phase}`,
+          'SUPRAMAS_INVALID_TRANSITION',
+        )
+      }
+      const failure = resolveFailure(request.phase, request.failure)
+      const base = runBase(current)
+      const updated: RunSnapshot = {
+        ...base,
+        revision: current.revision + 1,
+        phase: request.phase,
+        updatedAt: Math.max(Date.now(), current.updatedAt),
+        ...failure === undefined ? {} : { failure },
+      }
+      await table.put(ref.id, { ...record, snapshot: updated })
+      return cloneRun(updated)
+    })
   }
 }
 

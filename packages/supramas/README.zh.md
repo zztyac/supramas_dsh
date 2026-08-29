@@ -1,23 +1,20 @@
 ---
-description: "用于 DSH 运行控制、Stage 1 领域校验和证据工具的 SupraMAS 包组。"
+description: "面向 DSH 持久化运行控制、Stage 1 领域校验和证据工具的 SupraMAS 包。"
 kind: "package-map"
 ---
 
-# SupraMAS 包组
+# SupraMAS 包
 
 [English](README.md) | 中文
 
-本组是材料科学扩展边界。`domain` 保留并校验 Stage 1 artifact，
-`supramas` 管理运行和证据状态，`tool-supramas` 暴露窄模型控制。后续阶段
-只扩展这些契约，不修改 DSH 智能体循环。
+本组包构成材料科学扩展接缝。`supramas-domain` 保存并校验 Stage 1 产物， `supramas` 管理持久运行与证据状态，`tool-supramas` 暴露范围受控的模型工具。 后续阶段通过扩展这些契约演进，不修改 DSH agent loop。
 
 | 包 | 职责 |
 |---|---|
-| [`@deepseek-ai/dsh-supramas-domain`](supramas-domain/README.zh.md) | 策略树 wire 类型、语义图校验和本地证据原文字面核验 |
-| [`@deepseek-ai/dsh-supramas`](supramas/README.zh.md) | 运行生命周期、比较并交换版本、角色权限和每次运行的证据目录 |
-| [`@deepseek-ai/dsh-tool-supramas`](tool-supramas/README.zh.md) | 带可执行信封的运行、论文、文本块、产物读取和证据核验工具 |
+| [`@deepseek-ai/dsh-supramas-domain`](supramas-domain/README.zh.md) | 策略树 wire 类型、语义图校验和本地证据逐字检查 |
+| [`@deepseek-ai/dsh-supramas`](supramas/README.zh.md) | 运行/证据原子持久化、重启恢复、CAS 生命周期 revision 与角色权限 |
+| [`@deepseek-ai/dsh-tool-supramas`](tool-supramas/README.zh.md) | 运行发现/控制，以及论文、文本块、产物读取和证据核验工具 |
 
-## 已知限制与延期工作
+## 已知限制与后续工作
 
-M2 状态和证据目录仍只存在于当前进程。持久化恢复、文件系统论文存储、
-Stage 1 编排、API 和 Web UI 将在后续经过验证的里程碑加入。
+持久目录会保存产物元数据和抽取文本，但声明的 `runs/<jobId>/papers/...` 路径目前是溯源标识，不是 PDF 自动导入流程。 文献检索、Stage 1 编排、API 接口和 Web UI 将在后续经过验证的里程碑中实现。

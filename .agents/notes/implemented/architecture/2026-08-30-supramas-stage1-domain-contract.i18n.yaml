@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-08-30-supramas-stage1-domain-contract.md
-2026-08-30-supramas-stage1-domain-contract.md: 291dcd2c723c90e1b86912fb3d6120e8bf507a5b
-2026-08-30-supramas-stage1-domain-contract.zh.md: c2efb04d6ac032cde223c55a52f319da64c9ee81
+2026-08-30-supramas-stage1-domain-contract.md: bca9abc268b75fa4fbe7e1083582b9053b09c508
+2026-08-30-supramas-stage1-domain-contract.zh.md: 87b9317f85311324137deb59f73fb30a875e765c
