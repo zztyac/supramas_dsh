@@ -108,6 +108,18 @@ describe('SupraMasRuntime', () => {
     expect(error).toMatchObject({ name: 'SupraMasError', code: 'SUPRAMAS_INVALID_REQUEST' })
   })
 
+  it('guards evidence access against unknown and internally inconsistent runs', async () => {
+    const ctx = await setup()
+    expect(() => ctx.supramas.readPaper(SupraMasRunId('supramas:missing'), 'paper'))
+      .toThrowError(expect.objectContaining({ code: 'SUPRAMAS_RUN_NOT_FOUND' }))
+
+    const created = ctx.supramas.create(request)
+    const internals = ctx.supramas as unknown as { evidence: Map<string, unknown> }
+    internals.evidence.delete(created.id)
+    expect(() => ctx.supramas.readPaper(created.id, 'paper'))
+      .toThrowError(`SupraMAS evidence catalog missing for ${created.id}`)
+  })
+
   it('rejects every remaining invalid request boundary', async () => {
     const ctx = await setup()
     expect(() => ctx.supramas.create({

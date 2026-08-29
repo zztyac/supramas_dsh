@@ -58,6 +58,10 @@ describe('SupraMAS real Loader composition', () => {
     expect(ctx.tools.schemas().map(schema => schema.name)).toEqual([
       'supramas_run_create',
       'supramas_run_get',
+      'supramas_paper_store',
+      'supramas_chunk_extract',
+      'supramas_artifact_read',
+      'supramas_evidence_verify',
     ])
   }, 30_000)
 })

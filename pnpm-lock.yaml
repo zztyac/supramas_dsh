@@ -8963,7 +8963,20 @@ importers:
         specifier: workspace:^
         version: link:../../runtime-diagnostics/invariants
 
+  packages/supramas/supramas-domain:
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:^
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-invariants':
+        specifier: workspace:^
+        version: link:../../runtime-diagnostics/invariants
+
   packages/supramas/supramas:
+    dependencies:
+      '@deepseek-ai/dsh-supramas-domain':
+        specifier: workspace:^
+        version: link:../supramas-domain
     devDependencies:
       '@deepseek-ai/cordis':
         specifier: workspace:^

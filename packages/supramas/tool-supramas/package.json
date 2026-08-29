@@ -1,6 +1,6 @@
 {
   "name": "@deepseek-ai/dsh-tool-supramas",
-  "description": "Model-facing controls for material-science run creation and inspection",
+  "description": "Model-facing controls for SupraMAS runs and provenance-bound Stage 1 evidence",
   "version": "0.1.2-alpha.1",
   "publishConfig": {
     "access": "public"

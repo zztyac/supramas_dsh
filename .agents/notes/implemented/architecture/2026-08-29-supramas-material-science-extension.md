@@ -20,9 +20,10 @@ before evidence persistence, scientific schemas, recovery, and UI work begin.
 
 SupraMAS is implemented as DSH plugins, a profile bundle, and a selectable
 agent preset. The DSH agent loop, session model, loader, and subagent drivers
-remain unchanged. A capability package owns material-science state and
-authority; model-facing adapters expose narrow tools; later persistence,
-domain, API, and UI packages depend on those seams.
+remain unchanged. A capability package owns material-science run state and
+authority; a pure domain package owns Stage 1 schemas and evidence semantics;
+model-facing adapters expose narrow tools; later persistence, API, and UI
+packages depend on those seams.
 
 The profile bundle composes the capability runtime before its tool consumer.
 The shipped `supramas` preset selects that bundle and supplies the role-facing

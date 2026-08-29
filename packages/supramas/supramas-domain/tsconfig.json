@@ -15,12 +15,6 @@
       "path": "../../../vendor/cordis"
     },
     {
-      "path": "../../util/brand"
-    },
-    {
-      "path": "../supramas-domain"
-    },
-    {
       "path": "../../runtime-diagnostics/invariants"
     }
   ]

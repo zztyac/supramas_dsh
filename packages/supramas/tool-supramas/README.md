@@ -1,5 +1,5 @@
 ---
-description: "Narrow model-facing SupraMAS run tools with validated arguments and actionable result envelopes."
+description: "Narrow model-facing SupraMAS run and evidence tools with actionable result envelopes."
 kind: "package-reference"
 ---
 
@@ -9,38 +9,49 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-This consumer exposes `supramas_run_create` and `supramas_run_get` over `ctx.supramas`. Both tools validate arguments before execution and return one stable envelope with `status`, `summary`, `next_actions`, `artifacts`, and either `data` or a structured `error`.
+This consumer exposes six tools over `ctx.supramas`: run creation and lookup,
+paper registration, chunk storage, artifact reading, and literal evidence
+verification. Every tool validates arguments and returns the same stable
+success or recovery envelope.
 
 ## Use this package
 
-Compose it after `@deepseek-ai/dsh-tools` and `@deepseek-ai/dsh-supramas`. Create calls use snake-case model arguments and canonical run-owned paths. Domain failures remain successful tool transport values so the agent can follow `next_actions`; unknown programming faults still throw and remain visible to operators.
+Compose it after `@deepseek-ai/dsh-tools` and `@deepseek-ai/dsh-supramas`.
+Model arguments remain snake-case. Builder roles use paper and chunk tools;
+reviewers use artifact read and evidence verify. Role allowlists must hide tools
+the current role cannot invoke.
 
 ## Understand the implementation
 
-`src/index.ts` owns the two schemas, converts validated model arguments to capability requests, and maps stable domain errors to recovery guidance. The Cordis registration disposer removes both tools during HMR. A real Loader composition test protects package resolution and injection order.
+`src/index.ts` owns all six schemas and maps runtime and domain failures to
+root-cause, safe-retry, and stop-condition guidance. Domain failures remain
+successful tool transport values; unexpected programming faults still throw.
+The Cordis disposer removes all tools during HMR.
 
 ## Model Experience
 
-### Run tools
+### Run and evidence tools
 
 #### What the model sees
 
-The model sees the fixed `supramas_run_create` and `supramas_run_get` schemas. Results are compact JSON envelopes; failures name the root cause, safe retry, and stop condition.
+Only tools allowed for the selected role. `supramas_artifact_read` returns stored chunks in a compact JSON envelope, while verification returns a small proof.
 
 #### Token effect
 
-Fixed schema cost whenever these tools are visible, plus data-dependent compact JSON result tokens.
+Fixed cost for visible schemas. Artifact-read output grows with stored chunk text, so callers should read one paper at a time.
 
 #### KV Cache effect
 
-Prefix-stable while tool definitions and scoped visibility remain unchanged. Registering, removing, or restricting either tool may invalidate reuse from the tool-catalog boundary.
+Prefix-stable while tool definitions and scoped role visibility remain unchanged. Adding or removing a visible tool may invalidate reuse.
 
 ## Known Limitations and Deferred Work
 
-- M1 exposes creation and lookup only; transitions remain coordinator-internal until orchestration contracts land.
-- Listing, evidence, artifact, and review tools are introduced by later stages.
-- Tool visibility must still be restricted by the selected role allowlist.
+- Evidence state is process-local and does not yet write the declared path.
+- `supramas_chunk_extract` stores supplied verified text; PDF parsing arrives
+  with the filesystem-backed provider.
+- Literature search and run transitions remain coordinator integrations.
 
 ### Dev Note
 
-Keep model arguments snake-case and capability types camel-case. Caller-correctable `SupraMasError` values become envelopes; unexpected exceptions must not be hidden.
+Keep model arguments snake-case and capability types camel-case. Never turn an
+evidence mismatch into success or hide an unexpected exception.

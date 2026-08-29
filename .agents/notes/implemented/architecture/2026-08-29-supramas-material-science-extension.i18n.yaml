@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-08-29-supramas-material-science-extension.md
-2026-08-29-supramas-material-science-extension.md: 3489fe6f6cfee63fd520c9dc9a598b067a7b39f6
-2026-08-29-supramas-material-science-extension.zh.md: 14f7a1f7569d1b1f4b475232adbf240562c48c25
+2026-08-29-supramas-material-science-extension.md: 35a9b8f5c0ecc50f70734d640245487620e7ab35
+2026-08-29-supramas-material-science-extension.zh.md: d7301006d68cb44ad44d08284a3286bdebb9c7a2

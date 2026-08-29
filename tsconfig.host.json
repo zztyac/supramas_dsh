@@ -308,6 +308,7 @@
     { "path": "./packages/preset/agent-presets" },
     { "path": "./packages/preset/persona" },
     { "path": "./packages/supramas/supramas" },
+    { "path": "./packages/supramas/supramas-domain" },
     { "path": "./packages/supramas/tool-supramas" },
     { "path": "./packages/guard/repeat-tool-reminder" },
     { "path": "./packages/extensions/cordis-host-runner" },

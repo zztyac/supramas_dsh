@@ -1,5 +1,5 @@
 ---
-description: "按顺序挂载 SupraMAS 运行时和模型工具消费者的 DSH Profile bundle。"
+description: "按顺序挂载 SupraMAS 运行时和模型工具消费者的 DSH Profile Bundle。"
 kind: "package-bundle"
 ---
 
@@ -9,15 +9,19 @@ kind: "package-bundle"
 
 ## 概述
 
-该静态 Profile 补丁按依赖顺序把 SupraMAS 能力和工具消费者加入 DSH Profile。它不改变智能体循环行为，也不拥有运行时状态。
+该静态 Profile 补丁按依赖顺序把 SupraMAS 能力和六工具消费者加入 DSH
+Profile。它不修改智能体循环，也不拥有运行时状态。
 
 ## 使用本包
 
-在基础 Profile bundle 之后加入本 bundle。选择内置 `supramas` 智能体预设即可获得材料科学人格、本地 skills、用户提问和进程内委派工具。
+在基础 Profile Bundle 之后加入本包。选择内置 `supramas` 智能体预设，
+即可获得材料科学 Persona、skills、用户提问和进程内委派控制。
 
 ## 理解实现
 
-`cordis.patch.yml` 先插入 `@deepseek-ai/dsh-supramas`，再插入 `@deepseek-ai/dsh-tool-supramas`。TypeScript 入口仅为静态包载体；生命周期和不变量由插入的包负责。
+`cordis.patch.yml` 先插入 `@deepseek-ai/dsh-supramas`，再插入
+`@deepseek-ai/dsh-tool-supramas`。运行时依赖纯领域包；静态 Bundle 自身
+仍不拥有服务。
 
 ## 模型体验
 
@@ -25,20 +29,20 @@ kind: "package-bundle"
 
 #### 模型看到的内容
 
-模型不会直接看到静态 bundle 载体。`cordis.patch.yml` 中的行贡献两个 M1 工具 schema；单独选择的预设贡献材料科学人格和委派表面。
+模型不会直接看到载体。插入包贡献两个 `supramas_run_*` 工具和四个证据工具；角色白名单决定哪些 schema 可见。
 
 #### Token 影响
 
-bundle 没有直接开销。开销属于插入的工具 schema 和所选预设文本。
+Bundle 没有直接成本。可见工具 schema 和所选预设文本承担成本。
 
 #### KV Cache 影响
 
-bundle 自身不增加请求内容。修改插入行会改变组合后的模型表面，并可能使前缀复用失效。
+修改插入行或角色可见工具会改变组合后的模型表面，并可能使前缀复用失效。
 
 ## 已知限制与延期工作
 
-- 本 bundle 尚未安装持久化、文献提供者、API 路由或 UI 组件。它们会在后续里程碑中以独立且经过测试的 bundle 加入。
+- 本 Bundle 尚未安装持久化、文献 provider、API 路由或 UI 组件。
 
 ### 开发备注
 
-补丁中能力提供者必须位于消费者之前。不要把材料科学行为移入 DSH 核心循环。
+能力 provider 必须位于消费者之前。不要把材料科学行为移入 DSH 核心循环。

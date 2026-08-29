@@ -1,6 +1,14 @@
 /** Material-science run registry with compare-and-set lifecycle transitions. */
 
 import { Context, Service } from '@deepseek-ai/cordis'
+import {
+  EvidenceCatalog,
+  type EvidenceChunk,
+  type EvidenceRef,
+  type EvidenceVerification,
+  type PaperArtifact,
+  type PaperArtifactMetadata,
+} from '@deepseek-ai/dsh-supramas-domain'
 import type {
   CreateRunRequest,
   RunFailure,
@@ -15,6 +23,16 @@ import type {
 export type * from './types.ts'
 export type * from './roles.ts'
 export { ROLE_SPECS, resolveRole } from './roles.ts'
+export type * from '@deepseek-ai/dsh-supramas-domain'
+export {
+  EDGE_TYPES,
+  EvidenceCatalog,
+  SOURCE_TYPES,
+  StrategyTreeAssembler,
+  SupraMasDomainError,
+  TUNING_DIMENSIONS,
+  validateStrategyTree,
+} from '@deepseek-ai/dsh-supramas-domain'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -120,6 +138,7 @@ function resolveFailure(phase: RunPhase, failure: RunFailure | undefined): RunFa
 /** Process-local material-science run registry. Later persistence providers consume the same API. */
 export class SupraMasRuntime extends Service {
   private readonly runs = new Map<SupraMasRunIdBrand, RunSnapshot>()
+  private readonly evidence = new Map<SupraMasRunIdBrand, EvidenceCatalog>()
 
   constructor(ctx: Context) {
     super(ctx, 'supramas')
@@ -148,7 +167,57 @@ export class SupraMasRuntime extends Service {
       updatedAt: now,
     }
     this.runs.set(id, run)
+    this.evidence.set(id, new EvidenceCatalog(spec.jobId))
     return cloneRun(run)
+  }
+
+  private evidenceFor(id: SupraMasRunIdBrand): EvidenceCatalog {
+    if (!this.runs.has(id)) throw new SupraMasError(`SupraMAS run ${id} does not exist`, 'SUPRAMAS_RUN_NOT_FOUND')
+    const catalog = this.evidence.get(id)
+    if (catalog === undefined) throw new Error(`SupraMAS evidence catalog missing for ${id}`)
+    return catalog
+  }
+
+  /**
+   * Register one canonical paper artifact under a run.
+   * @param id - Stable owning run identity.
+   * @param metadata - Canonical run-local paper metadata.
+   * @returns a detached empty artifact.
+   */
+  storePaper(id: SupraMasRunIdBrand, metadata: PaperArtifactMetadata): PaperArtifact {
+    return this.evidenceFor(id).storePaper(metadata)
+  }
+
+  /**
+   * Add one provenance-bound chunk to a stored paper.
+   * @param id - Stable owning run identity.
+   * @param paperId - Owning paper identity.
+   * @param chunk - Local page-aware evidence text.
+   * @returns a detached stored chunk.
+   */
+  addEvidenceChunk(id: SupraMasRunIdBrand, paperId: string, chunk: EvidenceChunk): EvidenceChunk {
+    return this.evidenceFor(id).addChunk(paperId, chunk)
+  }
+
+  /**
+   * Read one detached local paper artifact.
+   * @param id - Stable owning run identity.
+   * @param paperId - Paper identity.
+   * @returns the artifact or `undefined` when absent.
+   */
+  readPaper(id: SupraMasRunIdBrand, paperId: string): PaperArtifact | undefined {
+    return this.evidenceFor(id).getPaper(paperId)
+  }
+
+  /**
+   * Verify one evidence quote against run-local paper chunks.
+   * @param id - Stable owning run identity.
+   * @param paperId - Expected owning paper.
+   * @param evidence - Chunk, page, and exact evidence quote.
+   * @returns stable verified provenance.
+   */
+  verifyEvidence(id: SupraMasRunIdBrand, paperId: string, evidence: EvidenceRef): EvidenceVerification {
+    return this.evidenceFor(id).verify(paperId, evidence)
   }
 
   /**

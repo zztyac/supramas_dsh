@@ -1,6 +1,6 @@
 {
-  "name": "@deepseek-ai/dsh-supramas",
-  "description": "Material-science run state, role authority, and local evidence catalogs for DeepSeek Harness",
+  "name": "@deepseek-ai/dsh-supramas-domain",
+  "description": "Strict Stage 1 strategy-tree and local evidence contracts for SupraMAS",
   "version": "0.1.2-alpha.1",
   "publishConfig": {
     "access": "public"
@@ -8,7 +8,7 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/deepseek-ai/deepseek-harness.git",
-    "directory": "packages/supramas/supramas"
+    "directory": "packages/supramas/supramas-domain"
   },
   "type": "module",
   "main": "lib/index.js",
@@ -21,10 +21,6 @@
     "./invariant": {
       "types": "./lib/types/invariant.d.ts",
       "default": "./lib/invariant.js"
-    },
-    "./roles": {
-      "types": "./lib/types/roles.d.ts",
-      "default": "./lib/roles.js"
     },
     "./types": {
       "types": "./lib/types/types.d.ts",
@@ -40,16 +36,11 @@
     "lib/types/**/*.d.ts"
   ],
   "license": "MIT",
-  "dependencies": {
-    "@deepseek-ai/dsh-supramas-domain": "workspace:^"
-  },
   "peerDependencies": {
-    "@deepseek-ai/dsh-brand": "workspace:^",
     "@deepseek-ai/dsh-invariants": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"
   },
   "devDependencies": {
-    "@deepseek-ai/dsh-brand": "workspace:^",
     "@deepseek-ai/dsh-invariants": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"
   }

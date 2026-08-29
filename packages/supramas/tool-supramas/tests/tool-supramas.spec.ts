@@ -26,11 +26,15 @@ function call(ctx: Context, name: string, args: unknown) {
 }
 
 describe('dsh-tool-supramas', () => {
-  it('registers two narrow model-facing tools', async () => {
+  it('registers the run and evidence model-facing tools', async () => {
     const ctx = await setup()
     expect(ctx.tools.schemas().map(schema => schema.name)).toEqual([
       'supramas_run_create',
       'supramas_run_get',
+      'supramas_paper_store',
+      'supramas_chunk_extract',
+      'supramas_artifact_read',
+      'supramas_evidence_verify',
     ])
   })
 
@@ -96,13 +100,13 @@ describe('dsh-tool-supramas', () => {
     expect(result.isError).toBe(true)
   })
 
-  it('unregisters both tools when the plugin fiber is disposed', async () => {
+  it('unregisters all tools when the plugin fiber is disposed', async () => {
     const ctx = new Context()
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
     await ctx.plugin(SupraMasRuntime)
     const fiber = await ctx.plugin(ToolSupraMas)
-    expect(ctx.tools.schemas()).toHaveLength(2)
+    expect(ctx.tools.schemas()).toHaveLength(6)
     await fiber.dispose()
     expect(ctx.tools.schemas()).toHaveLength(0)
   })
