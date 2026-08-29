@@ -12,6 +12,12 @@ import {
 
 type UnknownObject = Record<string, unknown>
 
+function fixtureAt<T>(values: readonly T[], index: number, label: string): T {
+  const value = values[index]
+  if (value === undefined) throw new Error(`missing ${label} fixture at index ${index}`)
+  return value
+}
+
 function rootNode(): PaperNode {
   return {
     node_id: 'N0',
@@ -135,15 +141,15 @@ function changed(mutator: (tree: UnknownObject) => void): unknown {
 }
 
 function firstNode(tree: UnknownObject): UnknownObject {
-  return (tree.nodes as UnknownObject[])[0]
+  return fixtureAt(tree.nodes as UnknownObject[], 0, 'node')
 }
 
 function firstStrategy(tree: UnknownObject): UnknownObject {
-  return (firstNode(tree).strategy_records as UnknownObject[])[0]
+  return fixtureAt(firstNode(tree).strategy_records as UnknownObject[], 0, 'strategy record')
 }
 
 function firstLimitation(tree: UnknownObject): UnknownObject {
-  return (firstNode(tree).limitation_records as UnknownObject[])[0]
+  return fixtureAt(firstNode(tree).limitation_records as UnknownObject[], 0, 'limitation record')
 }
 
 describe('Stage 1 parser boundaries', () => {
@@ -333,7 +339,7 @@ describe('EvidenceCatalog boundaries', () => {
     const chunk = evidence.addChunk('p1', { chunk_id: 'c1', text: '  literal quote  ' })
     chunk.text = 'detached'
     evidence.addChunk('p1', { chunk_id: 'c2', page: null, text: 'second quote' })
-    expect(evidence.getPaper('p1')?.chunks[0].text).toContain('literal')
+    expect(fixtureAt(evidence.getPaper('p1')?.chunks ?? [], 0, 'evidence chunk').text).toContain('literal')
     expectCode(() => evidence.addChunk('p1', { chunk_id: 'c1', text: 'duplicate' }), 'SUPRAMAS_DUPLICATE_ID')
     expectCode(() => evidence.verify('missing', { chunk_id: 'c1', evidence_text: 'literal' }), 'SUPRAMAS_EVIDENCE_MISSING')
     expectCode(() => evidence.verify('p2', { chunk_id: 'c1', evidence_text: 'literal' }), 'SUPRAMAS_EVIDENCE_MISSING')
@@ -376,38 +382,40 @@ describe('Strategy-tree relationship boundaries', () => {
         const tree = rootTree(); tree.nodes.push({ ...rootNode(), node_id: 'N1' }); return { tree, evidence: catalog() }
       },
       () => {
-        const tree = rootTree(); tree.nodes[0].level = 1; tree.nodes[0].parent_id = null; return { tree, evidence: catalog() }
+        const tree = rootTree(); const node = fixtureAt(tree.nodes, 0, 'root node'); node.level = 1; node.parent_id = null; return { tree, evidence: catalog() }
       },
       () => {
-        const tree = rootTree(); tree.nodes[0].parent_id = 'N0'; return { tree, evidence: catalog() }
+        const tree = rootTree(); fixtureAt(tree.nodes, 0, 'root node').parent_id = 'N0'; return { tree, evidence: catalog() }
       },
       () => {
-        const pair = connected(); pair.tree.nodes[1].parent_id = 'missing'; return pair
+        const pair = connected(); fixtureAt(pair.tree.nodes, 1, 'child node').parent_id = 'missing'; return pair
       },
       () => {
-        const pair = connected(); pair.tree.nodes[1].parent_id = null; return pair
+        const pair = connected(); fixtureAt(pair.tree.nodes, 1, 'child node').parent_id = null; return pair
       },
       () => {
-        const pair = connected(); pair.tree.nodes[1].level = 2; return pair
+        const pair = connected(); fixtureAt(pair.tree.nodes, 1, 'child node').level = 2; return pair
       },
       () => {
-        const tree = rootTree(); tree.nodes[0].paper_id = 'missing'; return { tree, evidence: catalog() }
+        const tree = rootTree(); fixtureAt(tree.nodes, 0, 'root node').paper_id = 'missing'; return { tree, evidence: catalog() }
       },
       () => {
-        const tree = rootTree(); tree.nodes[0].paper_title = 'Wrong title'; return { tree, evidence: catalog() }
+        const tree = rootTree(); fixtureAt(tree.nodes, 0, 'root node').paper_title = 'Wrong title'; return { tree, evidence: catalog() }
       },
       () => {
         const tree = rootTree()
-        tree.nodes[0].strategy_records.push(structuredClone(tree.nodes[0].strategy_records[0]))
+        const node = fixtureAt(tree.nodes, 0, 'root node')
+        node.strategy_records.push(structuredClone(fixtureAt(node.strategy_records, 0, 'strategy record')))
         return { tree, evidence: catalog() }
       },
       () => {
         const tree = rootTree()
-        tree.nodes[0].limitation_records.push(structuredClone(tree.nodes[0].limitation_records[0]))
+        const node = fixtureAt(tree.nodes, 0, 'root node')
+        node.limitation_records.push(structuredClone(fixtureAt(node.limitation_records, 0, 'limitation record')))
         return { tree, evidence: catalog() }
       },
       () => {
-        const tree = rootTree(); tree.nodes[0].limitation_records[0].related_record_ids = ['missing']; return { tree, evidence: catalog() }
+        const tree = rootTree(); const node = fixtureAt(tree.nodes, 0, 'root node'); fixtureAt(node.limitation_records, 0, 'limitation record').related_record_ids = ['missing']; return { tree, evidence: catalog() }
       },
     ]
     const expected: SupraMasDomainErrorCode[] = [
@@ -426,23 +434,23 @@ describe('Strategy-tree relationship boundaries', () => {
     ]
     cases.forEach((make, index) => {
       const { tree, evidence } = make()
-      expectCode(() => validateStrategyTree(tree, evidence), expected[index])
+      expectCode(() => validateStrategyTree(tree, evidence), fixtureAt(expected, index, 'expected error code'))
     })
   })
 
   it('rejects broken edge identities, endpoints, claims, and incoming counts', () => {
     const mutations: Array<(tree: StrategyTree) => void> = [
-      (tree) => { tree.edges.push({ ...tree.edges[0] }) },
-      (tree) => { tree.edges[0].parent_node_id = 'missing' },
-      (tree) => { tree.edges[0].child_node_id = 'missing' },
-      (tree) => { tree.nodes[1].parent_id = 'N1' },
-      (tree) => { tree.nodes[1].level = 0 },
-      (tree) => { tree.edges[0].parent_limitation_id = 'missing' },
-      (tree) => { tree.edges[0].parent_expectation = 'wrong' },
-      (tree) => { tree.edges[0].child_record_id = 'missing' },
-      (tree) => { tree.edges[0].child_tuning_effect = 'wrong' },
+      (tree) => { tree.edges.push({ ...fixtureAt(tree.edges, 0, 'edge') }) },
+      (tree) => { fixtureAt(tree.edges, 0, 'edge').parent_node_id = 'missing' },
+      (tree) => { fixtureAt(tree.edges, 0, 'edge').child_node_id = 'missing' },
+      (tree) => { fixtureAt(tree.nodes, 1, 'child node').parent_id = 'N1' },
+      (tree) => { fixtureAt(tree.nodes, 1, 'child node').level = 0 },
+      (tree) => { fixtureAt(tree.edges, 0, 'edge').parent_limitation_id = 'missing' },
+      (tree) => { fixtureAt(tree.edges, 0, 'edge').parent_expectation = 'wrong' },
+      (tree) => { fixtureAt(tree.edges, 0, 'edge').child_record_id = 'missing' },
+      (tree) => { fixtureAt(tree.edges, 0, 'edge').child_tuning_effect = 'wrong' },
       (tree) => { tree.edges = [] },
-      (tree) => { tree.edges.push({ ...tree.edges[0], edge_id: 'E2' }) },
+      (tree) => { tree.edges.push({ ...fixtureAt(tree.edges, 0, 'edge'), edge_id: 'E2' }) },
     ]
     const expected: SupraMasDomainErrorCode[] = [
       'SUPRAMAS_DUPLICATE_ID',
@@ -460,7 +468,7 @@ describe('Strategy-tree relationship boundaries', () => {
     mutations.forEach((mutate, index) => {
       const { evidence, tree } = connected()
       mutate(tree)
-      expectCode(() => validateStrategyTree(tree, evidence), expected[index])
+      expectCode(() => validateStrategyTree(tree, evidence), fixtureAt(expected, index, 'expected error code'))
     })
   })
 
@@ -469,14 +477,14 @@ describe('Strategy-tree relationship boundaries', () => {
     const assembler = new StrategyTreeAssembler({
       job_id: 'demo', research_topic: 'BZO pinning in REBCO',
     }, evidence)
-    assembler.addNode(tree.nodes[0])
-    const duplicatePaper = { ...tree.nodes[1], node_id: 'N2', paper_id: 'paper-1' }
+    assembler.addNode(fixtureAt(tree.nodes, 0, 'root node'))
+    const duplicatePaper = { ...fixtureAt(tree.nodes, 1, 'child node'), node_id: 'N2', paper_id: 'paper-1' }
     expectCode(() => assembler.addNode(duplicatePaper), 'SUPRAMAS_DUPLICATE_ID')
-    assembler.addNode(tree.nodes[1])
-    assembler.addEdge(tree.edges[0])
+    assembler.addNode(fixtureAt(tree.nodes, 1, 'child node'))
+    assembler.addEdge(fixtureAt(tree.edges, 0, 'edge'))
     expect(assembler.build()).toEqual({
       job_id: 'demo', research_topic: 'BZO pinning in REBCO', nodes: tree.nodes, edges: tree.edges,
     })
-    expectCode(() => assembler.addEdge(tree.edges[0]), 'SUPRAMAS_DUPLICATE_ID')
+    expectCode(() => assembler.addEdge(fixtureAt(tree.edges, 0, 'edge')), 'SUPRAMAS_DUPLICATE_ID')
   })
 })

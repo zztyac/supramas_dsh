@@ -8,6 +8,12 @@ import {
   type StrategyTree,
 } from '../src/index.ts'
 
+function fixtureAt<T>(values: readonly T[], index: number, label: string): T {
+  const value = values[index]
+  if (value === undefined) throw new Error(`missing ${label} fixture at index ${index}`)
+  return value
+}
+
 function catalog(): EvidenceCatalog {
   const evidence = new EvidenceCatalog('demo')
   evidence.storePaper({
@@ -96,11 +102,11 @@ describe('SupraMAS Stage 1 domain contract', () => {
 
   it('rejects evidence that is absent from or disagrees with its local chunk', () => {
     const missing = rootTree()
-    missing.nodes[0].strategy_records[0].evidence.chunk_id = 'missing'
+    fixtureAt(fixtureAt(missing.nodes, 0, 'node').strategy_records, 0, 'strategy record').evidence.chunk_id = 'missing'
     expect(domainCode(() => validateStrategyTree(missing, catalog()))).toBe('SUPRAMAS_EVIDENCE_MISSING')
 
     const mismatch = rootTree()
-    mismatch.nodes[0].strategy_records[0].evidence.evidence_text = 'invented measurement'
+    fixtureAt(fixtureAt(mismatch.nodes, 0, 'node').strategy_records, 0, 'strategy record').evidence.evidence_text = 'invented measurement'
     expect(domainCode(() => validateStrategyTree(mismatch, catalog()))).toBe('SUPRAMAS_EVIDENCE_MISMATCH')
   })
 
@@ -109,14 +115,15 @@ describe('SupraMAS Stage 1 domain contract', () => {
     duplicate.nodes.push({ ...rootNode(), node_id: 'N1', level: 1, parent_id: 'N0' })
     expect(domainCode(() => validateStrategyTree(duplicate, catalog()))).toBe('SUPRAMAS_DUPLICATE_ID')
 
-    duplicate.nodes[1].paper_id = 'paper-2'
-    duplicate.nodes[1].node_id = 'N0'
+    const duplicateNode = fixtureAt(duplicate.nodes, 1, 'duplicate node')
+    duplicateNode.paper_id = 'paper-2'
+    duplicateNode.node_id = 'N0'
     expect(domainCode(() => validateStrategyTree(duplicate, catalog()))).toBe('SUPRAMAS_DUPLICATE_ID')
   })
 
   it('rejects record references and edge claims that do not match their source records', () => {
     const brokenRecord = rootTree()
-    brokenRecord.nodes[0].limitation_records[0].related_record_ids = ['missing-record']
+    fixtureAt(fixtureAt(brokenRecord.nodes, 0, 'node').limitation_records, 0, 'limitation record').related_record_ids = ['missing-record']
     expect(domainCode(() => validateStrategyTree(brokenRecord, catalog()))).toBe('SUPRAMAS_BROKEN_REFERENCE')
 
     const evidence = catalog()
@@ -134,9 +141,10 @@ describe('SupraMAS Stage 1 domain contract', () => {
     child.parent_id = 'N0'
     child.paper_id = 'paper-2'
     child.paper_title = 'Follow-up BZO loading study'
-    child.strategy_records[0].record_id = 'R2'
-    child.strategy_records[0].tuning_effect = 'Multiple BZO loadings were compared.'
-    child.strategy_records[0].evidence = { chunk_id: 'paper-2-p1', page: 1, evidence_text: 'Multiple BZO loadings' }
+    const childStrategy = fixtureAt(child.strategy_records, 0, 'child strategy record')
+    childStrategy.record_id = 'R2'
+    childStrategy.tuning_effect = 'Multiple BZO loadings were compared.'
+    childStrategy.evidence = { chunk_id: 'paper-2-p1', page: 1, evidence_text: 'Multiple BZO loadings' }
     child.limitation_records = []
     tree.nodes.push(child)
     tree.edges.push({
