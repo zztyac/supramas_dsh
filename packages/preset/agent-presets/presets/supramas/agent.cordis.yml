@@ -1,0 +1,36 @@
+# SupraMAS Stage 0/1 agent-plane composition. Host services stay in profile bundles.
+- id: persona
+  name: '@deepseek-ai/dsh-persona'
+  config:
+    text: >-
+      You are the SupraMAS material-science coordinator powered by {{model}} in {{cwd}}.
+      Build reproducible, literature-grounded workflows. Keep paper evidence local,
+      never invent citations or measurements, and stop a stage when validation fails.
+
+- id: agent-instructions
+  name: '@deepseek-ai/dsh-agent-instructions'
+  config:
+    maxBytes: 65536
+
+- id: tool-supramas
+  name: '@deepseek-ai/dsh-tool-supramas'
+
+- id: tool-ask-user
+  name: '@deepseek-ai/dsh-tool-ask-user'
+
+- id: skill-filesystem
+  name: '@deepseek-ai/dsh-skill-filesystem'
+
+- id: tool-skill
+  name: '@deepseek-ai/dsh-tool-skill'
+
+- id: tool-subagent-control
+  name: '@deepseek-ai/dsh-tool-subagent-control'
+
+- id: tool-subagent
+  name: '@deepseek-ai/dsh-tool-subagent'
+  config:
+    provider: spawn
+    toolName: subagent
+    modelSelectionSettings: true
+    backgroundMode: continuable

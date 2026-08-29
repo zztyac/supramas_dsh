@@ -1,0 +1,6 @@
+# SupraMAS is a profile extension: the capability must mount before its tool consumer.
+- insert:
+    - id: supramas-runtime
+      name: '@deepseek-ai/dsh-supramas'
+    - id: tool-supramas
+      name: '@deepseek-ai/dsh-tool-supramas'

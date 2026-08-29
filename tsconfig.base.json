@@ -231,6 +231,10 @@
       "@deepseek-ai/dsh-experimental-inspector": ["./packages/experimental/inspector/src"],
       "@deepseek-ai/dsh-experimental-inspector/client": ["./packages/experimental/inspector/src/client/index.ts"],
       "@deepseek-ai/dsh-util-crypto": ["./packages/util/crypto/src"],
+      // The bundle keeps the short profile-facing directory `supramas`; its
+      // npm name remains distinct from the runtime package mounted by it.
+      "@deepseek-ai/dsh-supramas-bundle": ["./packages/bundle/supramas/src"],
+      "@deepseek-ai/dsh-supramas-bundle/invariant": ["./packages/bundle/supramas/src/invariant.ts"],
       // BEGIN generated package aliases — pnpm run gen-tsconfig-paths
       "@deepseek-ai/dsh-acp": ["./packages/acp/acp/src"],
       "@deepseek-ai/dsh-acp/invariant": ["./packages/acp/acp/src/invariant.ts"],
@@ -478,6 +482,8 @@
       "@deepseek-ai/dsh-subprocess-e2b/invariant": ["./packages/e2b/subprocess-e2b/src/invariant.ts"],
       "@deepseek-ai/dsh-subprocess-local": ["./packages/subprocess/subprocess-local/src"],
       "@deepseek-ai/dsh-subprocess-local/invariant": ["./packages/subprocess/subprocess-local/src/invariant.ts"],
+      "@deepseek-ai/dsh-supramas": ["./packages/supramas/supramas/src"],
+      "@deepseek-ai/dsh-supramas/invariant": ["./packages/supramas/supramas/src/invariant.ts"],
       "@deepseek-ai/dsh-system-prompt": ["./packages/core/system-prompt/src"],
       "@deepseek-ai/dsh-system-prompt/invariant": ["./packages/core/system-prompt/src/invariant.ts"],
       "@deepseek-ai/dsh-terminal": ["./packages/terminal/terminal/src"],
@@ -527,6 +533,8 @@
       "@deepseek-ai/dsh-tool-subagent-control/invariant": ["./packages/subagent/tool-subagent-control/src/invariant.ts"],
       "@deepseek-ai/dsh-tool-subagent-report": ["./packages/subagent/tool-subagent-report/src"],
       "@deepseek-ai/dsh-tool-subagent-report/invariant": ["./packages/subagent/tool-subagent-report/src/invariant.ts"],
+      "@deepseek-ai/dsh-tool-supramas": ["./packages/supramas/tool-supramas/src"],
+      "@deepseek-ai/dsh-tool-supramas/invariant": ["./packages/supramas/tool-supramas/src/invariant.ts"],
       "@deepseek-ai/dsh-tool-terminal": ["./packages/terminal/tool-terminal/src"],
       "@deepseek-ai/dsh-tool-terminal/invariant": ["./packages/terminal/tool-terminal/src/invariant.ts"],
       "@deepseek-ai/dsh-tool-todo": ["./packages/todo/tool-todo/src"],
