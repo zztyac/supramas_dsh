@@ -9,15 +9,15 @@ kind: "package-reference"
 
 ## 概述
 
-本能力注册由 DSH storage-domain 服务支持的确定性材料科学运行目录 `ctx.supramas`。每次运行都有稳定标识、CAS revision、受约束的阶段图、规范产物 路径、角色白名单，以及由 `@deepseek-ai/dsh-supramas-domain` 提供的隔离 Stage 1 证据目录。
+本能力注册由 DSH storage-domain 服务支持的确定性材料科学运行目录 `ctx.supramas`。每次运行都有稳定标识、CAS revision、受约束的阶段图、规范产物路径、角色白名单、隔离证据目录，以及可选的持久 Stage 1 工作流。
 
 ## 使用方式
 
-在任何 SupraMAS 工具消费者之前挂载 DSH 存储栈和本服务。使用规范 `runs/<jobId>` 路径创建运行，保留返回的 revision 供状态迁移，再在该运行标识下 登记论文和证据文本块。读取和核验始终返回隔离副本。重启后使用 `list()` 发现 持久任务，再用当前 revision 将 `recoverable_failed` 运行迁回 `running`。
+在任何 SupraMAS 工具消费者之前挂载 DSH 存储栈和本服务。创建运行并推进到 `task_ready`，再携带精确 revision 调用 `startStage1()`。读取 `getStage1().nextAction`，通过 CAS 方法提交 builder/reviewer 结果，并仅在状态机返回 `finalize` 后调用 `finalizeStage1()`。重启后使用恢复出的 revision 迁回 `running`，精确的待执行动作不会丢失。
 
 ## 实现说明
 
-`src/types.ts` 定义生命周期值，`src/roles.ts` 管理角色权限，`src/spec.ts` 定义 带版本的 `supramas/runs` 存储领域，`src/index.ts` 校验状态迁移并把证据语义委托 给领域包。一条存储记录包含完整运行快照和全部论文文本块。只有持久写入成功后 才发布新的内存状态，因此写入失败不会暴露部分生命周期或证据变更。
+`src/types.ts` 定义生命周期与工作流视图，`src/roles.ts` 管理角色权限，`src/spec.ts` 定义带版本的存储领域，`src/index.ts` 校验状态迁移并把工作流/证据语义委托给领域包。一条存储记录包含运行快照、全部论文文本块和工作流；每次工作流变更整体替换该记录并递增 revision。
 
 服务初始化时，`running` 和 `validating` 记录会被改写为 `recoverable_failed`，revision 递增，并附带可重试的 `process-restarted` 失败。 稳定 sequence 可在时间戳相同时保持创建顺序。
 
@@ -41,7 +41,7 @@ kind: "package-reference"
 
 - 持久记录包含论文元数据和抽取文本块，但本包不抓取或解析 PDF。
 - `local_path` 作为规范溯源路径校验；独立文件导入 provider 负责物化源文件。
-- 文献检索和科学审查决策仍由独立角色负责。
+- 科学审查仍由独立、只读子智能体决策；运行时只强制 accept/revise/reject 门。
 
 ### 开发说明
 

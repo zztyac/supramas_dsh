@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-08-30-supramas-stage1-orchestration.md
+2026-08-30-supramas-stage1-orchestration.md: 451542531c5befd9f50691f3cf352017af15b3fe
+2026-08-30-supramas-stage1-orchestration.zh.md: 8890e2e444f7d3cc3003f027d176b9efbd8e98b5

@@ -26,13 +26,24 @@ export const ROLE_SPECS: readonly RoleSpec[] = [
   {
     id: 'strategy-coordinator',
     purpose: 'Advance the deterministic Stage 1 run and delegate bounded work.',
-    tools: ['supramas_run_list', 'supramas_run_get', 'supramas_run_transition', 'subagent', 'subagent_control'],
+    tools: [
+      'supramas_run_list',
+      'supramas_run_get',
+      'supramas_run_transition',
+      'supramas_stage1_start',
+      'supramas_stage1_get',
+      'supramas_stage1_builder_submit',
+      'supramas_stage1_reviewer_submit',
+      'supramas_stage1_finalize',
+      'supramas_builder',
+      'supramas_reviewer',
+    ],
     outputSchema: 'supramas.coordinator.v1',
   },
   {
     id: 'strategy-builder',
     purpose: 'Find, verify, persist, and extract one paper candidate.',
-    tools: ['supramas_literature_search', 'supramas_paper_store', 'supramas_chunk_extract'],
+    tools: ['skill', 'web_search', 'web_fetch', 'supramas_paper_store', 'supramas_chunk_extract'],
     outputSchema: 'supramas.builder.v1',
   },
   {
@@ -51,6 +62,6 @@ export const ROLE_SPECS: readonly RoleSpec[] = [
  */
 export function resolveRole(id: RoleId): RoleSpec {
   const role = ROLE_SPECS.find(candidate => candidate.id === id)
-  if (role === undefined) throw new TypeError(`unknown SupraMAS role: ${String(id)}`)
+  if (role === undefined) throw new TypeError(`unknown SupraMAS role: ${id}`)
   return role
 }

@@ -1,6 +1,11 @@
 /** Pure material-science run types shared by the runtime and its consumers. */
 
 import type { Branded } from '@deepseek-ai/dsh-brand'
+import type {
+  Stage1NextAction,
+  Stage1Workflow,
+  StrategyTree,
+} from '@deepseek-ai/dsh-supramas-domain'
 
 /** Stable identity of one SupraMAS run. */
 export type SupraMasRunId = Branded<'SupraMasRunId'>
@@ -56,6 +61,18 @@ export interface CreateRunRequest {
 export interface TransitionRunRequest {
   readonly phase: RunPhase
   readonly failure?: RunFailure
+}
+
+/** One detached durable workflow view paired with its exact run revision. */
+export interface Stage1RunState {
+  readonly run: RunSnapshot
+  readonly workflow: Stage1Workflow
+  readonly nextAction: Stage1NextAction
+}
+
+/** Final workflow commit including the validated Stage 1 artifact. */
+export interface FinalizedStage1RunState extends Stage1RunState {
+  readonly tree: StrategyTree
 }
 
 /** Stable caller-correctable runtime error classifications. */

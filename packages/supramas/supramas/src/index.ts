@@ -4,21 +4,32 @@ import { Context, Service } from '@deepseek-ai/cordis'
 import type { KvTable } from '@deepseek-ai/dsh-storage-domain'
 import {
   EvidenceCatalog,
+  createStage1Workflow,
+  finalizeStage1Workflow as finalizeWorkflow,
+  nextStage1Action,
+  submitStage1Builder as applyBuilderSubmission,
+  submitStage1Review as applyReviewSubmission,
+  validateStage1Workflow,
   type EvidenceChunk,
   type EvidenceRef,
   type EvidenceVerification,
   type PaperArtifact,
   type PaperArtifactMetadata,
+  type Stage1BuilderSubmission,
+  type Stage1ReviewSubmission,
+  type Stage1WorkflowConfig,
 } from '@deepseek-ai/dsh-supramas-domain'
 import { supraMasDomainSpec, type SupraMasRunRecord } from './spec.ts'
 import type {
   CreateRunRequest,
+  FinalizedStage1RunState,
   RunFailure,
   RunPhase,
   RunRef,
   RunSnapshot,
   SupraMasErrorCode,
   SupraMasRunId as SupraMasRunIdBrand,
+  Stage1RunState,
   TransitionRunRequest,
 } from './types.ts'
 
@@ -32,6 +43,7 @@ export {
   supraMasRunFailure,
   supraMasRunRecord,
   supraMasRunSnapshot,
+  supraMasStage1Workflow,
 } from './spec.ts'
 export type { SupraMasRunRecord } from './spec.ts'
 export { ROLE_SPECS, resolveRole } from './roles.ts'
@@ -184,6 +196,26 @@ function catalogFromRecord(record: SupraMasRunRecord): EvidenceCatalog {
   return catalog
 }
 
+function stage1State(record: SupraMasRunRecord, catalog: EvidenceCatalog): Stage1RunState | undefined {
+  if (record.workflow === undefined) return undefined
+  const workflow = validateStage1Workflow(record.workflow, catalog)
+  return {
+    run: runFromStored(record.snapshot),
+    workflow,
+    nextAction: nextStage1Action(workflow),
+  }
+}
+
+function advanceRun(record: SupraMasRunRecord, phase: RunPhase): RunSnapshot {
+  const current = runFromStored(record.snapshot)
+  return {
+    ...runBase(current),
+    revision: current.revision + 1,
+    phase,
+    updatedAt: Math.max(Date.now(), current.updatedAt),
+  }
+}
+
 /** Durable material-science run registry over the DSH storage-domain form. */
 export class SupraMasRuntime extends Service {
   static inject = ['storageDomain']
@@ -212,7 +244,14 @@ export class SupraMasRuntime extends Service {
         runDir: stored.snapshot.runDir,
       })
       this.nextSequence = Math.max(this.nextSequence, stored.sequence + 1)
-      this.evidence.set(id, catalogFromRecord(stored))
+      const catalog = catalogFromRecord(stored)
+      if (stored.workflow !== undefined) {
+        if (stored.workflow.config.jobId !== stored.snapshot.jobId) {
+          throw new Error(`SupraMAS workflow job ${stored.workflow.config.jobId} does not match run ${stored.snapshot.jobId}`)
+        }
+        validateStage1Workflow(stored.workflow, catalog)
+      }
+      this.evidence.set(id, catalog)
       if (stored.snapshot.phase === 'running' || stored.snapshot.phase === 'validating') {
         const recovered: SupraMasRunRecord = {
           ...stored,
@@ -287,6 +326,34 @@ export class SupraMasRuntime extends Service {
     const catalog = this.evidence.get(id)
     if (catalog === undefined) throw new Error(`SupraMAS evidence catalog missing for ${id}`)
     return catalog
+  }
+
+  private recordAt(ref: RunRef): SupraMasRunRecord {
+    const record = this.requireTable().get(ref.id)
+    if (record === undefined) {
+      throw new SupraMasError(`SupraMAS run ${ref.id} does not exist`, 'SUPRAMAS_RUN_NOT_FOUND')
+    }
+    if (record.snapshot.revision !== ref.revision) {
+      throw new SupraMasError(
+        `stale run revision ${ref.revision}; current revision is ${record.snapshot.revision}`,
+        'SUPRAMAS_STALE_REVISION',
+      )
+    }
+    return record
+  }
+
+  private requireRunningStage1(record: SupraMasRunRecord): Stage1RunState {
+    if (record.snapshot.phase !== 'running') {
+      throw new SupraMasError(
+        `Stage 1 workflow requires a running run, not ${record.snapshot.phase}`,
+        'SUPRAMAS_INVALID_TRANSITION',
+      )
+    }
+    const state = stage1State(record, catalogFromRecord(record))
+    if (state === undefined) {
+      throw new SupraMasError('run has no Stage 1 workflow', 'SUPRAMAS_INVALID_REQUEST')
+    }
+    return state
   }
 
   /**
@@ -379,6 +446,114 @@ export class SupraMasRuntime extends Service {
     return [...this.requireTable().entries()]
       .sort(([, left], [, right]) => left.sequence - right.sequence)
       .map(([, record]) => runFromStored(record.snapshot))
+  }
+
+  /** Start a durable Stage 1 workflow and atomically enter the running phase. */
+  startStage1(ref: RunRef, config: Stage1WorkflowConfig): Promise<Stage1RunState> {
+    return this.enqueue(async () => {
+      const record = this.recordAt(ref)
+      if (record.snapshot.phase !== 'task_ready') {
+        throw new SupraMasError(
+          `cannot start Stage 1 from ${record.snapshot.phase}`,
+          'SUPRAMAS_INVALID_TRANSITION',
+        )
+      }
+      if (record.workflow !== undefined) {
+        throw new SupraMasError('run already has a Stage 1 workflow', 'SUPRAMAS_INVALID_REQUEST')
+      }
+      if (config.jobId !== record.snapshot.jobId) {
+        throw new SupraMasError(
+          `workflow job ${config.jobId} must match run job ${record.snapshot.jobId}`,
+          'SUPRAMAS_INVALID_REQUEST',
+        )
+      }
+      const catalog = catalogFromRecord(record)
+      const workflow = validateStage1Workflow(createStage1Workflow(config), catalog)
+      const updated: SupraMasRunRecord = {
+        ...record,
+        snapshot: advanceRun(record, 'running'),
+        workflow,
+      }
+      await this.requireTable().put(ref.id, updated)
+      const state = stage1State(updated, catalog)
+      /* v8 ignore next -- updated is constructed with the validated workflow immediately above. */
+      if (state === undefined) throw new Error(`SupraMAS workflow disappeared for ${ref.id}`)
+      return state
+    })
+  }
+
+  /** Read a detached workflow plus the exact next builder/reviewer action. */
+  getStage1(id: SupraMasRunIdBrand): Stage1RunState | undefined {
+    const record = this.requireTable().get(id)
+    if (record === undefined) return undefined
+    return stage1State(record, catalogFromRecord(record))
+  }
+
+  /** Persist one builder result under compare-and-set revision control. */
+  submitStage1Builder(ref: RunRef, submission: Stage1BuilderSubmission): Promise<Stage1RunState> {
+    return this.enqueue(async () => {
+      const record = this.recordAt(ref)
+      const current = this.requireRunningStage1(record)
+      const catalog = catalogFromRecord(record)
+      const workflow = validateStage1Workflow(
+        applyBuilderSubmission(current.workflow, submission, catalog),
+        catalog,
+      )
+      const updated: SupraMasRunRecord = {
+        ...record,
+        snapshot: advanceRun(record, 'running'),
+        workflow,
+      }
+      await this.requireTable().put(ref.id, updated)
+      const state = stage1State(updated, catalog)
+      /* v8 ignore next -- updated preserves the workflow returned by the domain transition. */
+      if (state === undefined) throw new Error(`SupraMAS workflow disappeared for ${ref.id}`)
+      return state
+    })
+  }
+
+  /** Persist one reviewer decision; only acceptance can add the candidate to the tree. */
+  submitStage1Review(ref: RunRef, submission: Stage1ReviewSubmission): Promise<Stage1RunState> {
+    return this.enqueue(async () => {
+      const record = this.recordAt(ref)
+      const current = this.requireRunningStage1(record)
+      const catalog = catalogFromRecord(record)
+      const workflow = validateStage1Workflow(
+        applyReviewSubmission(current.workflow, submission, catalog),
+        catalog,
+      )
+      const updated: SupraMasRunRecord = {
+        ...record,
+        snapshot: advanceRun(record, 'running'),
+        workflow,
+      }
+      await this.requireTable().put(ref.id, updated)
+      const state = stage1State(updated, catalog)
+      /* v8 ignore next -- updated preserves the workflow returned by the domain transition. */
+      if (state === undefined) throw new Error(`SupraMAS workflow disappeared for ${ref.id}`)
+      return state
+    })
+  }
+
+  /** Validate and atomically commit the completed workflow and final strategy tree. */
+  finalizeStage1(ref: RunRef): Promise<FinalizedStage1RunState> {
+    return this.enqueue(async () => {
+      const record = this.recordAt(ref)
+      const current = this.requireRunningStage1(record)
+      const catalog = catalogFromRecord(record)
+      const finalized = finalizeWorkflow(current.workflow, catalog)
+      const workflow = validateStage1Workflow(finalized.workflow, catalog)
+      const updated: SupraMasRunRecord = {
+        ...record,
+        snapshot: advanceRun(record, 'completed'),
+        workflow,
+      }
+      await this.requireTable().put(ref.id, updated)
+      const state = stage1State(updated, catalog)
+      /* v8 ignore next -- finalized workflow is assigned to updated immediately before persistence. */
+      if (state === undefined) throw new Error(`SupraMAS workflow disappeared for ${ref.id}`)
+      return { ...state, tree: finalized.tree }
+    })
   }
 
   /**

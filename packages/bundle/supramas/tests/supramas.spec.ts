@@ -28,14 +28,21 @@ describe('dsh-supramas bundle', () => {
     })
   })
 
-  it('ships a selectable SupraMAS preset with delegation and the material-science persona', () => {
+  it('ships a selectable SupraMAS preset with isolated builder and reviewer delegation', () => {
     const root = resolve(fileURLToPath(new URL('../../..', import.meta.url)), 'preset', 'agent-presets', 'presets', 'supramas')
     expect(existsSync(resolve(root, 'preset.yml'))).toBe(true)
     const entries = yaml.load(readFileSync(resolve(root, 'agent.cordis.yml'), 'utf8'), {
       schema: entryListSchema,
-    }) as { id?: string; name?: string }[]
+    }) as { id?: string; name?: string; config?: Record<string, unknown> }[]
     expect(entries.find(entry => entry.id === 'persona')).toMatchObject({ name: '@deepseek-ai/dsh-persona' })
     expect(entries.find(entry => entry.id === 'tool-supramas')).toMatchObject({ name: '@deepseek-ai/dsh-tool-supramas' })
-    expect(entries.find(entry => entry.id === 'tool-subagent')).toMatchObject({ name: '@deepseek-ai/dsh-tool-subagent' })
+    expect(entries.find(entry => entry.id === 'tool-web')).toMatchObject({ name: '@deepseek-ai/dsh-tool-web' })
+    const builder = entries.find(entry => entry.id === 'tool-subagent-builder')
+    expect(builder).toMatchObject({ name: '@deepseek-ai/dsh-tool-subagent' })
+    expect(builder?.config).toMatchObject({ toolName: 'supramas_builder', enableRunInBackground: false })
+    const reviewer = entries.find(entry => entry.id === 'tool-subagent-reviewer')
+    expect(reviewer).toMatchObject({ name: '@deepseek-ai/dsh-tool-subagent' })
+    expect(reviewer?.config).toMatchObject({ toolName: 'supramas_reviewer', enableRunInBackground: false })
+    expect(entries.find(entry => entry.id === 'tool-subagent')).toBeUndefined()
   })
 })

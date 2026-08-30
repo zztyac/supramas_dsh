@@ -9,15 +9,15 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-This consumer exposes eight tools over `ctx.supramas`: run creation, durable listing, lookup, compare-and-set transition, paper registration, chunk storage, artifact reading, and literal evidence verification. Every tool validates arguments and returns the same stable success or recovery envelope.
+This consumer exposes thirteen tools over `ctx.supramas`: four run controls, five durable Stage 1 workflow controls, and four evidence controls. Every tool validates arguments and returns the same stable success or recovery envelope; workflow responses include structured `workflow`, `next_action`, and final `tree` data.
 
 ## Use this package
 
-Compose it after `@deepseek-ai/dsh-tools`, the DSH storage stack, and `@deepseek-ai/dsh-supramas`. Model arguments remain snake-case. Task setup can discover, create, and read runs; the coordinator owns transitions; builders use paper and chunk tools; reviewers use artifact read and evidence verify. Role allowlists must hide tools the current role cannot invoke.
+Compose it after `@deepseek-ai/dsh-tools`, the DSH storage stack, and `@deepseek-ai/dsh-supramas`. Model arguments remain snake-case. The coordinator owns `supramas_stage1_*`; builders use paper/chunk tools; reviewers use artifact read/evidence verify. The shipped preset exposes separate foreground `supramas_builder` and `supramas_reviewer` subagents with enforced tool filters.
 
 ## Understand the implementation
 
-`src/index.ts` owns all eight schemas and maps runtime and domain failures to root-cause, safe-retry, and stop-condition guidance. `supramas_run_transition` requires the exact revision returned by list/get, preventing stale callers from overwriting recovered work. Domain failures remain successful tool transport values; unexpected programming faults still throw. The Cordis disposer removes all tools during HMR.
+`src/index.ts` owns all thirteen schemas and maps runtime and domain failures to root-cause, safe-retry, and stop-condition guidance. Every workflow mutation requires the exact revision returned by the preceding call. Domain failures remain successful tool transport values; unexpected programming faults still throw. The Cordis disposer removes all tools during HMR.
 
 ## Model Experience
 
@@ -38,7 +38,7 @@ Prefix-stable while tool definitions and scoped role visibility remain unchanged
 ## Known Limitations and Deferred Work
 
 - `supramas_chunk_extract` stores supplied verified text; PDF parsing belongs to a later filesystem-backed ingestion provider.
-- Literature search and full Stage 1 orchestration are not yet model tools.
+- The builder currently uses DSH web search/fetch and skills; scholarly-index connectors and PDF ingestion are still separate providers.
 
 ### Dev Note
 

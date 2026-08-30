@@ -59,6 +59,11 @@ afterEach(async () => {
 describe('SupraMAS durable recovery', () => {
   it('restores runs and evidence, then marks interrupted work as resumable', async () => {
     const first = await harness()
+    const untouched = await first.ctx.supramas.create({
+      jobId: 'untouched-demo',
+      inputTaskPath: 'runs/untouched-demo/input_task.yaml',
+      runDir: 'runs/untouched-demo',
+    })
     const created = await first.ctx.supramas.create({
       jobId: 'restart-demo',
       inputTaskPath: 'runs/restart-demo/input_task.yaml',
@@ -92,6 +97,10 @@ describe('SupraMAS durable recovery', () => {
     await first.ctx.fiber.dispose()
 
     const second = await harness(first.root)
+    expect(second.ctx.supramas.get(untouched.id)).toMatchObject({
+      phase: 'created',
+      revision: untouched.revision,
+    })
     const restored = second.ctx.supramas.get(running.id)
     expect(restored).toMatchObject({
       phase: 'recoverable_failed',
@@ -185,5 +194,41 @@ describe('SupraMAS durable recovery', () => {
     await paperTable.put(paperId, paperRecord)
     await paper.ctx.fiber.dispose()
     await expect(harness(paper.root)).rejects.toThrow('does not match artifact')
+  })
+
+  it('rejects a durable workflow owned by a different job', async () => {
+    const first = await harness()
+    const created = await first.ctx.supramas.create({
+      jobId: 'workflow-owner',
+      inputTaskPath: 'runs/workflow-owner/input_task.yaml',
+      runDir: 'runs/workflow-owner',
+    })
+    const ready = await first.ctx.supramas.transition(created, { phase: 'task_ready' })
+    const started = await first.ctx.supramas.startStage1(ready, {
+      jobId: 'workflow-owner',
+      researchTopic: 'REBCO flux pinning',
+      maxDepth: 0,
+      maxRootAttempts: 1,
+      maxChildAttemptsPerLimitation: 1,
+    })
+    const table = (first.ctx.supramas as unknown as {
+      table: {
+        get(key: string): SupraMasRunRecord | undefined
+        put(key: string, value: SupraMasRunRecord): Promise<void>
+      }
+    }).table
+    const record = table.get(started.run.id)
+    if (record?.workflow === undefined) throw new Error('expected durable workflow record')
+    await table.put(started.run.id, {
+      ...record,
+      workflow: {
+        ...record.workflow,
+        config: { ...record.workflow.config, jobId: 'different-owner' },
+      },
+    })
+    await first.ctx.fiber.dispose()
+
+    await expect(harness(first.root))
+      .rejects.toThrow('workflow job different-owner does not match run workflow-owner')
   })
 })

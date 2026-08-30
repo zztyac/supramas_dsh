@@ -174,6 +174,8 @@ describe('SupraMAS Stage 1 domain contract', () => {
     assembler.addNode(rootNode())
 
     expect(assembler.build()).toEqual(rootTree())
-    expect(domainCode(() => assembler.addNode(rootNode()))).toBe('SUPRAMAS_DUPLICATE_ID')
+    expect(domainCode(() => {
+      assembler.addNode(rootNode())
+    })).toBe('SUPRAMAS_DUPLICATE_ID')
   })
 })

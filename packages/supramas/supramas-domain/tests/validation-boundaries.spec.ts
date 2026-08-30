@@ -479,12 +479,16 @@ describe('Strategy-tree relationship boundaries', () => {
     }, evidence)
     assembler.addNode(fixtureAt(tree.nodes, 0, 'root node'))
     const duplicatePaper = { ...fixtureAt(tree.nodes, 1, 'child node'), node_id: 'N2', paper_id: 'paper-1' }
-    expectCode(() => assembler.addNode(duplicatePaper), 'SUPRAMAS_DUPLICATE_ID')
+    expectCode(() => {
+      assembler.addNode(duplicatePaper)
+    }, 'SUPRAMAS_DUPLICATE_ID')
     assembler.addNode(fixtureAt(tree.nodes, 1, 'child node'))
     assembler.addEdge(fixtureAt(tree.edges, 0, 'edge'))
     expect(assembler.build()).toEqual({
       job_id: 'demo', research_topic: 'BZO pinning in REBCO', nodes: tree.nodes, edges: tree.edges,
     })
-    expectCode(() => assembler.addEdge(fixtureAt(tree.edges, 0, 'edge')), 'SUPRAMAS_DUPLICATE_ID')
+    expectCode(() => {
+      assembler.addEdge(fixtureAt(tree.edges, 0, 'edge'))
+    }, 'SUPRAMAS_DUPLICATE_ID')
   })
 })

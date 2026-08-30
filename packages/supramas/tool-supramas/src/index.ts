@@ -1,7 +1,7 @@
 /** Model-facing tools for the SupraMAS material-science run capability. */
 
 import type { Context } from '@deepseek-ai/cordis'
-import { defineTool, type ValueSchemaSpec } from '@deepseek-ai/dsh-tools'
+import { defineTool, type JsonValue, type ValueSchemaSpec } from '@deepseek-ai/dsh-tools'
 import {
   RUN_PHASES,
   SOURCE_TYPES,
@@ -10,9 +10,13 @@ import {
   SupraMasRunId,
   type EvidenceChunk,
   type EvidenceVerification,
+  type FinalizedStage1RunState,
   type PaperArtifact,
+  type PaperNodeDraft,
+  type ProposedStrategyEdge,
   type RunSnapshot,
   type SourceType,
+  type Stage1RunState,
 } from '@deepseek-ai/dsh-supramas'
 import '@deepseek-ai/dsh-supramas'
 
@@ -38,6 +42,9 @@ interface ToolEnvelope {
     chunk?: ToolEvidenceChunk
     artifact?: ToolPaperArtifact
     verification?: EvidenceVerification
+    workflow?: Record<string, JsonValue>
+    next_action?: Record<string, JsonValue>
+    tree?: Record<string, JsonValue>
   }
   error?: ToolFailure
 }
@@ -143,6 +150,9 @@ const outputSchema = {
             local_path: { type: 'string', required: true },
           },
         },
+        workflow: { type: 'object', additionalProperties: true },
+        next_action: { type: 'object', additionalProperties: true },
+        tree: { type: 'object', additionalProperties: true },
       },
     },
     error: {
@@ -279,6 +289,55 @@ function modelArtifact(artifact: PaperArtifact): ToolPaperArtifact {
   return { ...artifact, chunks: artifact.chunks.map(modelChunk) }
 }
 
+function jsonObject(value: object): Record<string, JsonValue> {
+  return structuredClone(value) as unknown as Record<string, JsonValue>
+}
+
+function stage1Envelope(state: Stage1RunState, summary: string): ToolEnvelope {
+  return {
+    status: 'success',
+    summary,
+    next_actions: state.run.phase === 'recoverable_failed'
+      ? ['resume_run', state.nextAction.kind]
+      : [state.nextAction.kind],
+    artifacts: [state.run.runDir],
+    data: {
+      run: state.run,
+      workflow: jsonObject(state.workflow),
+      next_action: jsonObject(state.nextAction),
+    },
+  }
+}
+
+function finalizedEnvelope(state: FinalizedStage1RunState): ToolEnvelope {
+  return {
+    status: 'success',
+    summary: `Completed Stage 1 workflow ${state.run.jobId}.`,
+    next_actions: ['inspect_strategy_tree'],
+    artifacts: [state.run.runDir],
+    data: {
+      run: state.run,
+      workflow: jsonObject(state.workflow),
+      next_action: jsonObject(state.nextAction),
+      tree: jsonObject(state.tree),
+    },
+  }
+}
+
+const reviewFindingSchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    target_id: { type: 'string', required: true },
+    issue: { type: 'string', required: true },
+    required_action: {
+      type: 'string',
+      required: true,
+      enum: ['revise', 'remove', 'downgrade', 'provide_more_evidence', 'answer_question'],
+    },
+  },
+} as const satisfies ValueSchemaSpec
+
 /** Register narrow run controls and provenance-bound Stage 1 evidence tools. */
 export function apply(ctx: Context): void {
   ctx.tools.register(defineTool({
@@ -400,6 +459,156 @@ export function apply(ctx: Context): void {
           data: { run },
         }
       })
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'supramas_stage1_start',
+    description: 'Start the durable Stage 1 coordinator from one approved task-ready run.',
+    parameters: {
+      run_id: { type: 'string', required: true, description: 'Owning deterministic SupraMAS run id.' },
+      revision: { type: 'integer', required: true, description: 'Exact task-ready run revision.' },
+      research_topic: { type: 'string', required: true, description: 'Approved Stage 1 research topic.' },
+      material_scope: { type: 'array', items: { type: 'string' }, description: 'Optional material search scope.' },
+      target_property: { type: 'array', items: { type: 'string' }, description: 'Optional target properties.' },
+      max_depth: { type: 'integer', required: true, description: 'Maximum accepted child depth; zero keeps only roots.' },
+      max_root_attempts: { type: 'integer', required: true, description: 'Real builder attempt budget for a root.' },
+      max_child_attempts_per_limitation: {
+        type: 'integer',
+        required: true,
+        description: 'Real builder attempt budget for each accepted limitation.',
+      },
+      max_branch_per_node: { type: 'integer', description: 'Optional accepted outgoing-edge cap per paper.' },
+      target_child_nodes: { type: 'integer', description: 'Optional accepted child-node target.' },
+    },
+    output,
+    async execute(args) {
+      return guard(async () => {
+        const runId = SupraMasRunId(args.run_id)
+        const run = ctx.supramas.get(runId)
+        if (run === undefined) {
+          throw new SupraMasError(`SupraMAS run ${args.run_id} was not found.`, 'SUPRAMAS_RUN_NOT_FOUND')
+        }
+        const state = await ctx.supramas.startStage1(
+          { id: runId, revision: args.revision },
+          {
+            jobId: run.jobId,
+            researchTopic: args.research_topic,
+            ...(args.material_scope === undefined ? {} : { materialScope: args.material_scope }),
+            ...(args.target_property === undefined ? {} : { targetProperty: args.target_property }),
+            maxDepth: args.max_depth,
+            maxRootAttempts: args.max_root_attempts,
+            maxChildAttemptsPerLimitation: args.max_child_attempts_per_limitation,
+            ...(args.max_branch_per_node === undefined ? {} : { maxBranchPerNode: args.max_branch_per_node }),
+            ...(args.target_child_nodes === undefined ? {} : { targetChildNodes: args.target_child_nodes }),
+          },
+        )
+        return stage1Envelope(state, `Started Stage 1 workflow ${state.run.jobId}.`)
+      })
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'supramas_stage1_get',
+    description: 'Read the durable Stage 1 workflow and its only legal next action.',
+    parameters: {
+      run_id: { type: 'string', required: true, description: 'Owning deterministic SupraMAS run id.' },
+    },
+    output,
+    async execute(args) {
+      return guard(() => {
+        const runId = SupraMasRunId(args.run_id)
+        if (ctx.supramas.get(runId) === undefined) {
+          throw new SupraMasError(`SupraMAS run ${args.run_id} was not found.`, 'SUPRAMAS_RUN_NOT_FOUND')
+        }
+        const state = ctx.supramas.getStage1(runId)
+        if (state === undefined) {
+          throw new SupraMasError(`SupraMAS run ${args.run_id} has no Stage 1 workflow.`, 'SUPRAMAS_INVALID_REQUEST')
+        }
+        return stage1Envelope(state, `Loaded Stage 1 workflow ${state.run.jobId}.`)
+      })
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'supramas_stage1_builder_submit',
+    description: 'Submit one builder attempt; candidates remain unaccepted until reviewer approval.',
+    parameters: {
+      run_id: { type: 'string', required: true, description: 'Owning deterministic SupraMAS run id.' },
+      revision: { type: 'integer', required: true, description: 'Exact current run revision.' },
+      paper_node: {
+        type: 'object',
+        additionalProperties: true,
+        description: 'Complete paper-node draft, omitted only when no supported candidate was found.',
+      },
+      edge: {
+        type: 'object',
+        additionalProperties: true,
+        description: 'Complete proposed child edge; omit for a root or unsupported child bridge.',
+      },
+      reason: { type: 'string', description: 'Evidence-based reason for an empty candidate or edge.' },
+      notes: { type: 'array', items: { type: 'string' }, description: 'Concise builder handoff notes.' },
+    },
+    output,
+    async execute(args) {
+      return guard(async () => {
+        const state = await ctx.supramas.submitStage1Builder(
+          { id: SupraMasRunId(args.run_id), revision: args.revision },
+          {
+            paper_node: args.paper_node === undefined ? null : args.paper_node as unknown as PaperNodeDraft,
+            edge: args.edge === undefined ? null : args.edge as unknown as ProposedStrategyEdge,
+            ...(args.reason === undefined ? {} : { reason: args.reason }),
+            notes: args.notes ?? [],
+          },
+        )
+        return stage1Envelope(state, `Recorded builder attempt for ${state.run.jobId}.`)
+      })
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'supramas_stage1_reviewer_submit',
+    description: 'Submit an accept, revise, or reject decision for the current pending candidate.',
+    parameters: {
+      run_id: { type: 'string', required: true, description: 'Owning deterministic SupraMAS run id.' },
+      revision: { type: 'integer', required: true, description: 'Exact current run revision.' },
+      decision: { type: 'string', required: true, enum: ['accept', 'revise', 'reject'] },
+      summary: { type: 'string', required: true, description: 'Evidence-grounded review summary.' },
+      critical_issues: { type: 'array', required: true, items: reviewFindingSchema },
+      edge_issues: { type: 'array', required: true, items: reviewFindingSchema },
+      acceptance_conditions: { type: 'array', required: true, items: { type: 'string' } },
+    },
+    output,
+    async execute(args) {
+      return guard(async () => {
+        const state = await ctx.supramas.submitStage1Review(
+          { id: SupraMasRunId(args.run_id), revision: args.revision },
+          {
+            decision: args.decision,
+            summary: args.summary,
+            critical_issues: args.critical_issues,
+            edge_issues: args.edge_issues,
+            acceptance_conditions: args.acceptance_conditions,
+          },
+        )
+        return stage1Envelope(state, `Recorded reviewer decision for ${state.run.jobId}.`)
+      })
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'supramas_stage1_finalize',
+    description: 'Strictly validate and atomically complete a Stage 1 workflow with no open frontier.',
+    parameters: {
+      run_id: { type: 'string', required: true, description: 'Owning deterministic SupraMAS run id.' },
+      revision: { type: 'integer', required: true, description: 'Exact current run revision.' },
+    },
+    output,
+    async execute(args) {
+      return guard(async () => finalizedEnvelope(await ctx.supramas.finalizeStage1({
+        id: SupraMasRunId(args.run_id),
+        revision: args.revision,
+      })))
     },
   }))
 

@@ -9,15 +9,15 @@ kind: "package-reference"
 
 ## 概述
 
-本消费者在 `ctx.supramas` 上暴露八个工具：创建运行、列出持久运行、读取运行、 基于 CAS revision 迁移状态、登记论文、保存文本块、读取产物和逐字核验证据。 每个工具都会校验参数，并返回同一种稳定的成功或恢复信封。
+本消费者在 `ctx.supramas` 上暴露十三个工具：四个运行控制、五个持久 Stage 1 工作流控制，以及四个证据控制。每个工具都会校验参数并返回统一信封；工作流响应包含结构化 `workflow`、`next_action` 和最终 `tree`。
 
 ## 使用方式
 
-在 `@deepseek-ai/dsh-tools`、DSH 存储栈和 `@deepseek-ai/dsh-supramas` 之后组合本包。模型参数保持 snake-case。任务配置角色可以发现、创建和读取运行； 协调器负责状态迁移；builder 使用论文和文本块工具；reviewer 使用产物读取和证据 核验。角色白名单必须隐藏当前角色无权调用的工具。
+在 `@deepseek-ai/dsh-tools`、DSH 存储栈和 `@deepseek-ai/dsh-supramas` 之后组合本包。模型参数保持 snake-case。coordinator 拥有 `supramas_stage1_*`；builder 使用论文/文本块工具；reviewer 使用产物读取/证据核验。内置 preset 暴露前台 `supramas_builder` 与 `supramas_reviewer` 子智能体，并强制执行各自 toolFilter。
 
 ## 实现说明
 
-`src/index.ts` 管理八个 schema，并把运行时和领域失败映射为根因、安全重试与停止 条件。`supramas_run_transition` 要求使用 list/get 返回的精确 revision，防止旧调用 方覆盖恢复后的任务。领域失败仍作为成功的工具传输值返回，意外编程故障继续抛出。 Cordis disposer 会在 HMR 时移除全部工具。
+`src/index.ts` 管理十三个 schema，并把运行时和领域失败映射为根因、安全重试与停止条件。每次工作流修改都要求使用上一调用返回的精确 revision。领域失败仍作为成功的工具传输值返回，意外编程故障继续抛出；Cordis disposer 会在 HMR 时移除全部工具。
 
 ## 模型体验
 
@@ -38,7 +38,7 @@ kind: "package-reference"
 ## 已知限制与后续工作
 
 - `supramas_chunk_extract` 保存调用方提供并核实的文本；PDF 解析属于后续文件导入 provider。
-- 文献检索和完整 Stage 1 编排尚未成为模型工具。
+- builder 当前使用 DSH web search/fetch 与 skills；学术索引连接器和 PDF 导入仍由独立 provider 承担。
 
 ### 开发说明
 

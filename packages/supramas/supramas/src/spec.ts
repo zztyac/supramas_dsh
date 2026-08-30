@@ -3,6 +3,7 @@
 import { z } from 'zod'
 import { defineDomain, domainTable } from '@deepseek-ai/dsh-storage-domain'
 import { SOURCE_TYPES } from '@deepseek-ai/dsh-supramas-domain'
+import type { Stage1Workflow } from '@deepseek-ai/dsh-supramas-domain'
 import { RUN_PHASES, type SupraMasRunId } from './types.ts'
 
 /** Stable branded run id at the durability boundary. */
@@ -44,11 +45,18 @@ export const supraMasPaperArtifact = z.object({
   chunks: z.array(supraMasEvidenceChunk),
 })
 
+/** Workflow is semantically revalidated with its reconstructed evidence catalog on startup. */
+export const supraMasStage1Workflow = z.custom<Stage1Workflow>(
+  value => typeof value === 'object' && value !== null && !Array.isArray(value),
+  'Stage 1 workflow must be an object',
+)
+
 /** Atomic persistence unit for one run and all of its provenance. */
 export const supraMasRunRecord = z.object({
   sequence: z.number().int().nonnegative(),
   snapshot: supraMasRunSnapshot,
   papers: z.record(z.string(), supraMasPaperArtifact),
+  workflow: supraMasStage1Workflow.optional(),
 })
 
 /** Stored run record inferred from the durability schema. */

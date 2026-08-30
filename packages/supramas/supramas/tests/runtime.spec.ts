@@ -84,14 +84,14 @@ describe('SupraMasRuntime', () => {
   it('rejects duplicate job ids and invalid path ownership with stable codes', async () => {
     const ctx = await setup()
     await ctx.supramas.create(request)
-    await expect(ctx.supramas.create(request)).rejects.toThrowError(
+    await expect(ctx.supramas.create(request)).rejects.toThrow(
       expect.objectContaining({ code: 'SUPRAMAS_RUN_EXISTS' }),
     )
     await expect(ctx.supramas.create({
       ...request,
       jobId: 'other',
       inputTaskPath: 'runs/stage1-demo/input_task.yaml',
-    })).rejects.toThrowError(expect.objectContaining({ code: 'SUPRAMAS_INVALID_REQUEST' }))
+    })).rejects.toThrow(expect.objectContaining({ code: 'SUPRAMAS_INVALID_REQUEST' }))
   })
 
   it('enforces compare-and-set revisions and the run phase graph', async () => {
@@ -107,12 +107,12 @@ describe('SupraMasRuntime', () => {
     await expect(ctx.supramas.transition(
       { id: created.id, revision: 1 },
       { phase: 'running' },
-    )).rejects.toThrowError(expect.objectContaining({ code: 'SUPRAMAS_STALE_REVISION' }))
+    )).rejects.toThrow(expect.objectContaining({ code: 'SUPRAMAS_STALE_REVISION' }))
 
     await expect(ctx.supramas.transition(
       { id: taskReady.id, revision: taskReady.revision },
       { phase: 'completed' },
-    )).rejects.toThrowError(expect.objectContaining({ code: 'SUPRAMAS_INVALID_TRANSITION' }))
+    )).rejects.toThrow(expect.objectContaining({ code: 'SUPRAMAS_INVALID_TRANSITION' }))
   })
 
   it('requires failure details and allows a recoverable run to resume', async () => {
@@ -122,7 +122,7 @@ describe('SupraMasRuntime', () => {
     const running = await ctx.supramas.transition(ready, { phase: 'running' })
 
     await expect(ctx.supramas.transition(running, { phase: 'recoverable_failed' }))
-      .rejects.toThrowError(expect.objectContaining({ code: 'SUPRAMAS_INVALID_REQUEST' }))
+      .rejects.toThrow(expect.objectContaining({ code: 'SUPRAMAS_INVALID_REQUEST' }))
 
     const stopped = await ctx.supramas.transition(running, {
       phase: 'recoverable_failed',
@@ -156,13 +156,13 @@ describe('SupraMasRuntime', () => {
   it('guards evidence access against unknown and internally inconsistent runs', async () => {
     const ctx = await setup()
     expect(() => ctx.supramas.readPaper(SupraMasRunId('supramas:missing'), 'paper'))
-      .toThrowError(expect.objectContaining({ code: 'SUPRAMAS_RUN_NOT_FOUND' }))
+      .toThrow(expect.objectContaining({ code: 'SUPRAMAS_RUN_NOT_FOUND' }))
 
     const created = await ctx.supramas.create(request)
     const internals = ctx.supramas as unknown as { evidence: Map<string, unknown> }
     internals.evidence.delete(created.id)
     expect(() => ctx.supramas.readPaper(created.id, 'paper'))
-      .toThrowError(`SupraMAS evidence catalog missing for ${created.id}`)
+      .toThrow(`SupraMAS evidence catalog missing for ${created.id}`)
   })
 
   it('rejects writes to unknown runs and impossible post-write catalog loss', async () => {
@@ -173,11 +173,11 @@ describe('SupraMasRuntime', () => {
       paper_title: 'Missing run',
       local_path: 'runs/missing/papers/paper-1.json',
       source_type: 'experimental',
-    })).rejects.toThrowError(expect.objectContaining({ code: 'SUPRAMAS_RUN_NOT_FOUND' }))
+    })).rejects.toThrow(expect.objectContaining({ code: 'SUPRAMAS_RUN_NOT_FOUND' }))
     await expect(ctx.supramas.addEvidenceChunk(missing, 'paper-1', {
       chunk_id: 'chunk-1',
       text: 'missing',
-    })).rejects.toThrowError(expect.objectContaining({ code: 'SUPRAMAS_RUN_NOT_FOUND' }))
+    })).rejects.toThrow(expect.objectContaining({ code: 'SUPRAMAS_RUN_NOT_FOUND' }))
 
     const created = await ctx.supramas.create(request)
     await ctx.supramas.storePaper(created.id, {
@@ -204,24 +204,24 @@ describe('SupraMasRuntime', () => {
       jobId: '/bad',
       inputTaskPath: 'runs/bad/input_task.yaml',
       runDir: 'runs/bad',
-    })).rejects.toThrowError(expect.objectContaining({ code: 'SUPRAMAS_INVALID_REQUEST' }))
+    })).rejects.toThrow(expect.objectContaining({ code: 'SUPRAMAS_INVALID_REQUEST' }))
 
     const created = await ctx.supramas.create(request)
     await expect(ctx.supramas.transition(created, {
       phase: 'task_ready',
       failure: { code: 'unexpected', message: 'not a failed phase', retryable: false },
-    })).rejects.toThrowError(expect.objectContaining({ code: 'SUPRAMAS_INVALID_REQUEST' }))
+    })).rejects.toThrow(expect.objectContaining({ code: 'SUPRAMAS_INVALID_REQUEST' }))
 
     const ready = await ctx.supramas.transition(created, { phase: 'task_ready' })
     const running = await ctx.supramas.transition(ready, { phase: 'running' })
     await expect(ctx.supramas.transition(running, {
       phase: 'failed',
       failure: { code: 'fatal', message: 'must not retry', retryable: true },
-    })).rejects.toThrowError(expect.objectContaining({ code: 'SUPRAMAS_INVALID_REQUEST' }))
+    })).rejects.toThrow(expect.objectContaining({ code: 'SUPRAMAS_INVALID_REQUEST' }))
 
     await expect(ctx.supramas.transition(
       { id: SupraMasRunId('supramas:missing'), revision: 1 },
       { phase: 'task_ready' },
-    )).rejects.toThrowError(expect.objectContaining({ code: 'SUPRAMAS_RUN_NOT_FOUND' }))
+    )).rejects.toThrow(expect.objectContaining({ code: 'SUPRAMAS_RUN_NOT_FOUND' }))
   })
 })

@@ -28,15 +28,26 @@ describe('SupraMAS role contracts', () => {
       'supramas_run_list',
       'supramas_run_get',
       'supramas_run_transition',
-      'subagent',
-      'subagent_control',
+      'supramas_stage1_start',
+      'supramas_stage1_get',
+      'supramas_stage1_builder_submit',
+      'supramas_stage1_reviewer_submit',
+      'supramas_stage1_finalize',
+      'supramas_builder',
+      'supramas_reviewer',
     ])
   })
 
   it('separates builder mutation tools from reviewer read-only tools', () => {
     const builder = resolveRole('strategy-builder')
     const reviewer = resolveRole('strategy-reviewer')
-    expect(builder.tools).toContain('supramas_paper_store')
+    expect(builder.tools).toEqual([
+      'skill',
+      'web_search',
+      'web_fetch',
+      'supramas_paper_store',
+      'supramas_chunk_extract',
+    ])
     expect(builder.tools).not.toContain('supramas_review_record')
     expect(reviewer.tools).toEqual([
       'supramas_artifact_read',

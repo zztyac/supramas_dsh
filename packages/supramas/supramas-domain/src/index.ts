@@ -23,6 +23,15 @@ import {
 
 export type * from './types.ts'
 export { EDGE_TYPES, SOURCE_TYPES, TUNING_DIMENSIONS } from './types.ts'
+export type * from './orchestration.ts'
+export {
+  createStage1Workflow,
+  finalizeStage1Workflow,
+  nextStage1Action,
+  submitStage1Builder,
+  submitStage1Review,
+  validateStage1Workflow,
+} from './orchestration.ts'
 
 type UnknownObject = Record<string, unknown>
 

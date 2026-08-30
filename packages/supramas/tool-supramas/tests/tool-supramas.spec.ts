@@ -78,6 +78,11 @@ describe('dsh-tool-supramas', () => {
       'supramas_run_list',
       'supramas_run_get',
       'supramas_run_transition',
+      'supramas_stage1_start',
+      'supramas_stage1_get',
+      'supramas_stage1_builder_submit',
+      'supramas_stage1_reviewer_submit',
+      'supramas_stage1_finalize',
       'supramas_paper_store',
       'supramas_chunk_extract',
       'supramas_artifact_read',
@@ -122,11 +127,12 @@ describe('dsh-tool-supramas', () => {
       artifacts: [],
       error: {
         code: 'SUPRAMAS_RUN_EXISTS',
-        root_cause_hint: expect.stringContaining('already exists'),
-        safe_retry: expect.stringContaining('job_id'),
-        stop_condition: expect.stringContaining('Do not overwrite'),
       },
     })
+    const serialized = JSON.stringify(result.value)
+    expect(serialized).toContain('already exists')
+    expect(serialized).toContain('job_id')
+    expect(serialized).toContain('Do not overwrite')
   })
 
   it('reads a run and reports a stable recovery path when it is absent', async () => {
@@ -150,7 +156,7 @@ describe('dsh-tool-supramas', () => {
   it('unregisters all tools when the plugin fiber is disposed', async () => {
     const ctx = await setup(false)
     const fiber = await ctx.plugin(ToolSupraMas)
-    expect(ctx.tools.schemas()).toHaveLength(8)
+    expect(ctx.tools.schemas()).toHaveLength(13)
     await fiber.dispose()
     expect(ctx.tools.schemas()).toHaveLength(0)
   })
@@ -342,5 +348,203 @@ describe('dsh-tool-supramas', () => {
       run_dir: 'runs/demo',
     })
     expect(unexpected.isError).toBe(true)
+  })
+
+  it('reports Stage 1 lookup and start boundaries through stable envelopes', async () => {
+    const ctx = await setup()
+    const missingStart = await call(ctx, 'supramas_stage1_start', {
+      run_id: 'supramas:missing-stage1',
+      revision: 1,
+      research_topic: 'REBCO flux pinning',
+      max_depth: 0,
+      max_root_attempts: 1,
+      max_child_attempts_per_limitation: 1,
+    })
+    expect(missingStart.isError).toBe(false)
+    if (missingStart.isError) throw new Error('expected missing Stage 1 start envelope')
+    expect(missingStart.value).toMatchObject({ error: { code: 'SUPRAMAS_RUN_NOT_FOUND' } })
+
+    const missingGet = await call(ctx, 'supramas_stage1_get', { run_id: 'supramas:missing-stage1' })
+    expect(missingGet.isError).toBe(false)
+    if (missingGet.isError) throw new Error('expected missing Stage 1 lookup envelope')
+    expect(missingGet.value).toMatchObject({ error: { code: 'SUPRAMAS_RUN_NOT_FOUND' } })
+
+    const created = await ctx.supramas.create({
+      jobId: 'stage1-boundaries',
+      inputTaskPath: 'runs/stage1-boundaries/input_task.yaml',
+      runDir: 'runs/stage1-boundaries',
+    })
+    const noWorkflow = await call(ctx, 'supramas_stage1_get', { run_id: created.id })
+    expect(noWorkflow.isError).toBe(false)
+    if (noWorkflow.isError) throw new Error('expected missing workflow envelope')
+    expect(noWorkflow.value).toMatchObject({ error: { code: 'SUPRAMAS_INVALID_REQUEST' } })
+
+    const ready = await ctx.supramas.transition(created, { phase: 'task_ready' })
+    const started = await call(ctx, 'supramas_stage1_start', {
+      run_id: ready.id,
+      revision: ready.revision,
+      research_topic: 'REBCO flux pinning',
+      material_scope: ['REBCO'],
+      target_property: ['in-field Jc'],
+      max_depth: 1,
+      max_root_attempts: 1,
+      max_child_attempts_per_limitation: 1,
+      max_branch_per_node: 2,
+      target_child_nodes: 3,
+    })
+    expect(started.isError).toBe(false)
+    if (started.isError) throw new Error('expected Stage 1 boundary start')
+    expect(started.value).toMatchObject({ next_actions: ['build_root'] })
+
+    const loaded = await call(ctx, 'supramas_stage1_get', { run_id: ready.id })
+    expect(loaded.isError).toBe(false)
+    if (loaded.isError) throw new Error('expected Stage 1 lookup success')
+    expect(loaded.value).toMatchObject({
+      next_actions: ['build_root'],
+      data: {
+        workflow: {
+          config: {
+            materialScope: ['REBCO'],
+            targetProperty: ['in-field Jc'],
+            maxBranchPerNode: 2,
+            targetChildNodes: 3,
+          },
+        },
+      },
+    })
+
+    const running = ctx.supramas.get(ready.id)
+    if (running === undefined) throw new Error('expected running Stage 1 run')
+    await ctx.supramas.transition(running, {
+      phase: 'recoverable_failed',
+      failure: {
+        code: 'reviewer-unavailable',
+        message: 'reviewer can be resumed later',
+        retryable: true,
+      },
+    })
+    const recoverable = await call(ctx, 'supramas_stage1_get', { run_id: ready.id })
+    expect(recoverable.isError).toBe(false)
+    if (recoverable.isError) throw new Error('expected recoverable Stage 1 lookup')
+    expect(recoverable.value).toMatchObject({ next_actions: ['resume_run', 'build_root'] })
+  })
+
+  it('drives the durable Stage 1 builder-reviewer gate through model-facing tools', async () => {
+    const ctx = await setup()
+    const created = await ctx.supramas.create({
+      jobId: 'workflow-tool',
+      inputTaskPath: 'runs/workflow-tool/input_task.yaml',
+      runDir: 'runs/workflow-tool',
+    })
+    const ready = await ctx.supramas.transition(created, { phase: 'task_ready' })
+    await ctx.supramas.storePaper(ready.id, {
+      paper_id: 'paper-1',
+      paper_title: 'Tool workflow paper',
+      local_path: 'runs/workflow-tool/papers/paper-1.json',
+      source_type: 'experimental',
+    })
+    await ctx.supramas.addEvidenceChunk(ready.id, 'paper-1', {
+      chunk_id: 'paper-1-c1',
+      page: 1,
+      text: 'BZO additions improve in-field Jc, but only one loading was measured.',
+    })
+
+    const started = await call(ctx, 'supramas_stage1_start', {
+      run_id: ready.id,
+      revision: ready.revision,
+      research_topic: 'REBCO flux pinning',
+      max_depth: 0,
+      max_root_attempts: 2,
+      max_child_attempts_per_limitation: 2,
+    })
+    expect(started.isError).toBe(false)
+    if (started.isError) throw new Error('expected Stage 1 start success')
+    expect(started.value).toMatchObject({
+      status: 'success',
+      next_actions: ['build_root'],
+      data: { run: { phase: 'running', revision: ready.revision + 1 }, next_action: { kind: 'build_root' } },
+    })
+
+    const built = await call(ctx, 'supramas_stage1_builder_submit', {
+      run_id: ready.id,
+      revision: ready.revision + 1,
+      paper_node: {
+        paper_id: 'paper-1',
+        paper_title: 'Tool workflow paper',
+        source_type: 'experimental',
+        strategy_records: [{
+          record_id: 'R1',
+          tuning_dimension: 'Composition tuning',
+          tuning_strategy: 'Add BZO artificial pinning centers.',
+          tuning_effect: 'BZO additions improve in-field Jc.',
+          evidence: { chunk_id: 'paper-1-c1', page: 1, evidence_text: 'BZO additions improve in-field Jc' },
+          confidence: 0.9,
+        }],
+        limitation_records: [{
+          limitation_id: 'L1',
+          limitation: 'Only one loading was measured.',
+          expectation: 'Compare multiple BZO loadings.',
+          related_record_ids: ['R1'],
+          evidence: { chunk_id: 'paper-1-c1', page: 1, evidence_text: 'only one loading was measured' },
+          confidence: 0.9,
+        }],
+      },
+      notes: [],
+    })
+    expect(built.isError).toBe(false)
+    if (built.isError) throw new Error('expected builder submission success')
+    expect(built.value).toMatchObject({
+      next_actions: ['review_candidate'],
+      data: { run: { revision: ready.revision + 2 }, next_action: { kind: 'review_candidate' } },
+    })
+
+    const malformedHandoff = await call(ctx, 'supramas_stage1_builder_submit', {
+      run_id: ready.id,
+      revision: ready.revision + 2,
+      edge: {
+        edge_id: 'unexpected-root-edge',
+        parent_node_id: 'N0',
+        child_node_id: 'N1',
+        source_limitation_id: 'L1',
+        expectation: 'Compare multiple BZO loadings.',
+        edge_type: 'direct',
+      },
+      reason: 'exercise a malformed root handoff',
+    })
+    expect(malformedHandoff.isError).toBe(false)
+    if (malformedHandoff.isError) throw new Error('expected malformed handoff envelope')
+    expect(malformedHandoff.value).toMatchObject({ error: { code: 'SUPRAMAS_DOMAIN_INVALID' } })
+
+    const reviewed = await call(ctx, 'supramas_stage1_reviewer_submit', {
+      run_id: ready.id,
+      revision: ready.revision + 2,
+      decision: 'accept',
+      summary: 'The local chunk supports the candidate.',
+      critical_issues: [],
+      edge_issues: [],
+      acceptance_conditions: [],
+    })
+    expect(reviewed.isError).toBe(false)
+    if (reviewed.isError) throw new Error('expected reviewer submission success')
+    expect(reviewed.value).toMatchObject({
+      next_actions: ['finalize'],
+      data: { run: { revision: ready.revision + 3 }, next_action: { kind: 'finalize' } },
+    })
+
+    const completed = await call(ctx, 'supramas_stage1_finalize', {
+      run_id: ready.id,
+      revision: ready.revision + 3,
+    })
+    expect(completed.isError).toBe(false)
+    if (completed.isError) throw new Error('expected Stage 1 finalization success')
+    expect(completed.value).toMatchObject({
+      status: 'success',
+      next_actions: ['inspect_strategy_tree'],
+      data: {
+        run: { phase: 'completed', revision: ready.revision + 4 },
+        workflow: { status: 'completed' },
+        tree: { job_id: 'workflow-tool', nodes: [{ paper_id: 'paper-1' }] },
+      },
+    })
   })
 })

@@ -9,15 +9,15 @@ kind: "package-reference"
 
 ## 概述
 
-这个纯领域包保存现有 SupraMAS `strategy_tree.json` wire 结构，并校验 JSON Schema 无法关联的事实。它强制每篇论文只对应一个节点、标识稳定、父子层级正确、 记录引用有效、期望与边文本一致，而且证据原文必须解析到运行内本地文本块。
+这个纯领域包保存现有 SupraMAS `strategy_tree.json` wire 结构，并加入确定、可恢复的 builder/reviewer 状态机。它强制每篇论文只对应一个节点、标识稳定、父子层级正确、记录引用有效、期望与边文本一致、证据原文可解析，同时执行 reviewer 接收门、真实尝试预算和递归 frontier 终止规则。
 
 ## 使用方式
 
-为每个任务创建一个 `EvidenceCatalog`，登记规范的 `runs/<jobId>/papers/<paperId>.json` 产物并加入带页码的文本块。通过 `validateStrategyTree` 校验不可信树数据，或逐步向 `StrategyTreeAssembler` 加入 节点和边后调用 `build()`。SupraMAS 运行时会把完整目录序列化进持久运行记录。
+为每个任务创建一个 `EvidenceCatalog`，登记规范产物并加入带页码的文本块。调用 `createStage1Workflow` 后读取 `nextStage1Action`，通过对应函数提交一次 builder 或 reviewer 结果，并仅在全部 frontier 终止后调用 `finalizeStage1Workflow`。运行时会把工作流与证据目录序列化到同一持久运行记录。
 
 ## 实现说明
 
-`src/types.ts` 管理封闭的 Stage 1 词汇和 snake-case 产物类型。`src/index.ts` 先执行严格结构解析，再做语义和证据检查。所有返回产物都是隔离副本，失败使用 稳定的 `SupraMasDomainError` code。`EvidenceCatalog` 本身仍是纯内存值对象； 持久化由消费它的运行时负责。
+`src/types.ts` 管理封闭的 Stage 1 词汇和 snake-case 产物类型。`src/index.ts` 执行严格产物与证据检查；`src/orchestration.ts` 管理纯工作流转换和持久状态复验。所有返回值都是隔离副本，失败使用稳定的 `SupraMasDomainError` code。
 
 ## 模型体验
 
@@ -38,7 +38,7 @@ kind: "package-reference"
 ## 已知限制与后续工作
 
 - 本包校验调用方提供的产物和文本块，但不自行解析 PDF。
-- Schema 校验不决定科学上的接受与否；reviewer 角色仍负责 accept、revise 或 reject。
+- 状态机强制 reviewer 决策流程，但不替代 reviewer 模型的科学判断。
 
 ### 开发说明
 
