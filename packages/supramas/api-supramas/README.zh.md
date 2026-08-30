@@ -31,6 +31,7 @@ kind: "package-reference"
 | --- | --- |
 | `list()` | 按创建顺序返回全部持久材料任务。 |
 | `get(runId)` | 返回一项任务的当前视图。 |
+| `artifacts(runId)` | 返回三项最终成果名称和就绪状态，不返回 Host 路径。 |
 | `createStage1(request)` | 规范化输入、创建运行、批准任务并进入 Stage 1。 |
 | `resume(runId, revision)` | 在 revision 控制下恢复可恢复任务。 |
 | `cancel(runId, revision)` | 在 revision 控制下取消非终态任务。 |

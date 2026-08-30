@@ -296,8 +296,16 @@ const SERVICE_ROLES: ServiceRole[] = [
     pkg: 'supramas',
     title: 'Durable material-science task runtime',
     mode: 'core',
-    consumers: ['api-supramas', 'tool-supramas'],
+    consumers: ['supramas-artifacts', 'api-supramas', 'tool-supramas'],
     note: 'Owns Stage 1 run state, evidence catalogs, role authority, compare-and-set lifecycle transitions, and restart recovery over the domain storage facility.',
+  },
+  {
+    key: 'supramasArtifacts',
+    pkg: 'supramas-artifacts',
+    title: 'Stage 1 compatibility artifact projection',
+    mode: 'core',
+    consumers: ['api-supramas', 'tool-supramas'],
+    note: 'Atomically projects durable SupraMAS state into workspace-confined task, evidence, restart, and final-output files without becoming a second workflow authority.',
   },
   {
     key: 'supramasController',

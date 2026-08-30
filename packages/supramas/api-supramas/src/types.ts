@@ -22,6 +22,9 @@ export interface SupraMasCreateStage1RequestV1 {
   readonly researchTopic: string
   readonly materialScope?: readonly string[]
   readonly targetProperty?: readonly string[]
+  readonly evidencePolicy?: string
+  readonly include?: readonly string[]
+  readonly exclude?: readonly string[]
   readonly maxDepth?: number
   readonly maxRootAttempts?: number
   readonly maxChildAttemptsPerLimitation?: number
@@ -118,6 +121,20 @@ export interface SupraMasRunViewV1 {
 export interface SupraMasRunListV1 {
   readonly apiVersion: typeof SUPRAMAS_API_VERSION
   readonly items: readonly SupraMasRunViewV1[]
+}
+
+/** Browser-safe readiness for one canonical Stage 1 output. */
+export interface SupraMasOutputFileV1 {
+  readonly name: 'strategy_tree.json' | 'node_review_log.jsonl' | 'review_report.md'
+  readonly ready: boolean
+}
+
+/** Stable final-output manifest without Host filesystem paths. */
+export interface SupraMasArtifactsViewV1 {
+  readonly apiVersion: typeof SUPRAMAS_API_VERSION
+  readonly runId: string
+  readonly ready: boolean
+  readonly files: readonly SupraMasOutputFileV1[]
 }
 
 /** Stable SupraMAS failure details returned by the Typert namespace. */

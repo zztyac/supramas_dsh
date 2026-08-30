@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
@@ -20,6 +20,7 @@ import {
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import SupraMasRuntime from '../../supramas/src/index.ts'
+import SupraMasArtifacts from '../../supramas-artifacts/src/index.ts'
 import * as ToolSupraMas from '../src/index.ts'
 
 const contexts: Context[] = []
@@ -46,6 +47,7 @@ async function setup(loadTools = true): Promise<Context> {
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
   await ctx.plugin(SupraMasRuntime)
+  await ctx.plugin(SupraMasArtifacts, { root })
   if (loadTools) await ctx.plugin(ToolSupraMas)
   return ctx
 }
@@ -83,6 +85,7 @@ describe('dsh-tool-supramas', () => {
       'supramas_stage1_builder_submit',
       'supramas_stage1_reviewer_submit',
       'supramas_stage1_finalize',
+      'supramas_artifacts_sync',
       'supramas_paper_store',
       'supramas_chunk_extract',
       'supramas_artifact_read',
@@ -156,7 +159,7 @@ describe('dsh-tool-supramas', () => {
   it('unregisters all tools when the plugin fiber is disposed', async () => {
     const ctx = await setup(false)
     const fiber = await ctx.plugin(ToolSupraMas)
-    expect(ctx.tools.schemas()).toHaveLength(13)
+    expect(ctx.tools.schemas()).toHaveLength(14)
     await fiber.dispose()
     expect(ctx.tools.schemas()).toHaveLength(0)
   })
@@ -545,6 +548,24 @@ describe('dsh-tool-supramas', () => {
         workflow: { status: 'completed' },
         tree: { job_id: 'workflow-tool', nodes: [{ paper_id: 'paper-1' }] },
       },
+    })
+    await expect(readFile(join(roots.at(-1)!, 'runs/workflow-tool/outputs/strategy_tree.json'), 'utf8'))
+      .resolves.toContain('"job_id": "workflow-tool"')
+
+    const synced = await call(ctx, 'supramas_artifacts_sync', { run_id: ready.id })
+    expect(synced.isError, JSON.stringify(synced)).toBe(false)
+    if (synced.isError) throw new Error('expected idempotent artifact sync')
+    expect(synced.value).toMatchObject({
+      status: 'success',
+      next_actions: ['inspect_exported_artifacts'],
+      artifacts: [
+        'runs/workflow-tool/input_task.yaml',
+        'runs/workflow-tool/papers/paper-1.json',
+        'runs/workflow-tool/tree_state.json',
+        'runs/workflow-tool/outputs/strategy_tree.json',
+        'runs/workflow-tool/outputs/node_review_log.jsonl',
+        'runs/workflow-tool/outputs/review_report.md',
+      ],
     })
   })
 })

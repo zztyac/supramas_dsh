@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-本消费者在 `ctx.supramas` 上暴露十三个工具：四个运行控制、五个持久 Stage 1 工作流控制，以及四个证据控制。每个工具都会校验参数并返回统一信封；工作流响应包含结构化 `workflow`、`next_action` 和最终 `tree`。
+本消费者在 SupraMAS 服务上暴露十四个工具：四个运行控制、五个持久 Stage 1 工作流控制、一个兼容文件修复控制，以及四个证据控制。每个工具都会校验参数并返回统一信封；工作流响应包含结构化 `workflow`、`next_action` 和最终 `tree`。
 
 ## 目录
 
@@ -23,13 +23,13 @@ kind: "package-reference"
 
 ## 使用方式
 
-在 `@deepseek-ai/dsh-tools`、DSH 存储栈和 `@deepseek-ai/dsh-supramas` 之后组合本包。模型参数保持 snake-case。coordinator 拥有 `supramas_stage1_*`；builder 使用论文/文本块工具；reviewer 使用产物读取/证据核验。内置 preset 暴露前台 `supramas_builder` 与 `supramas_reviewer` 子智能体，并强制执行各自 toolFilter。
+在 `@deepseek-ai/dsh-tools`、DSH 存储栈、`@deepseek-ai/dsh-supramas` 和 `@deepseek-ai/dsh-supramas-artifacts` 之后组合本包。模型参数保持 snake-case。coordinator 拥有 `supramas_stage1_*` 和 `supramas_artifacts_sync`；builder 使用论文/文本块工具；reviewer 使用产物读取/证据核验。内置 preset 暴露前台 `supramas_builder` 与 `supramas_reviewer` 子智能体，并强制执行各自 toolFilter。
 
 <a id="understand-the-implementation"></a>
 
 ## 实现说明
 
-`src/index.ts` 管理十三个 schema，并把运行时和领域失败映射为根因、安全重试与停止条件。每次工作流修改都要求使用上一调用返回的精确 revision。领域失败仍作为成功的工具传输值返回，意外编程故障继续抛出；Cordis disposer 会在 HMR 时移除全部工具。
+`src/index.ts` 管理十四个 schema，并把运行时和领域失败映射为根因、安全重试与停止条件。完成操作会导出文件契约，`supramas_artifacts_sync` 则从持久状态修复中断的导出。每次工作流修改都要求使用上一调用返回的精确 revision。领域失败仍作为成功的工具传输值返回，意外编程故障继续抛出；Cordis disposer 会在 HMR 时移除全部工具。
 
 <a id="model-experience"></a>
 
@@ -39,7 +39,7 @@ kind: "package-reference"
 
 #### 模型看到什么
 
-只看到所选角色允许的工具。`supramas_run_list` 用于重启后发现任务，`supramas_artifact_read` 返回一篇论文的已存文本块，核验工具返回精简证明。
+只看到所选角色允许的工具。`supramas_run_list` 用于重启后发现任务，`supramas_artifacts_sync` 修复兼容文件，`supramas_artifact_read` 返回一篇论文的已存文本块，核验工具返回精简证明。
 
 #### Token 影响
 

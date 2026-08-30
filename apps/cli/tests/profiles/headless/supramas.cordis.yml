@@ -1,0 +1,64 @@
+# Keyless real-provider canary for the SupraMAS runtime and model-facing tools.
+- id: base
+  name: '@deepseek-ai/cordis-plugin-include'
+  config:
+    path: ./cordis.yml
+    patches:
+      - id: llm-deepseek
+        config:
+          baseURL: !!js process.env.DSH_SUPRAMAS_BASE_URL
+          thinking: disabled
+      - id: agent-spine
+        config:
+          agents:
+            - id: main
+              provider: deepseek-official
+              model: deepseek-v4-flash
+              cwd: !!js process.cwd()
+          workspaceContext: false
+          persona: 'SupraMAS provider canary. Execute the requested SupraMAS tool and report its result.'
+      - insert:
+          - id: supramas-storage
+            name: '@deepseek-ai/dsh-storage'
+          - id: supramas-storage-json
+            name: '@deepseek-ai/dsh-storage-json'
+            config:
+              root: './.supramas-store'
+          - id: supramas-storage-domain
+            name: '@deepseek-ai/dsh-storage-domain'
+            config:
+              backend: json
+          - id: supramas-runtime
+            name: '@deepseek-ai/dsh-supramas'
+          - id: supramas-artifacts
+            name: '@deepseek-ai/dsh-supramas-artifacts'
+            config:
+              root: !!js process.cwd()
+          - id: tool-supramas
+            name: '@deepseek-ai/dsh-tool-supramas'
+          - id: tool-subagent-builder
+            name: '@deepseek-ai/dsh-tool-subagent'
+            config:
+              provider: spawn
+              toolName: supramas_builder
+              enableRunInBackground: false
+              backgroundMode: one-shot
+              maxDepth: 1
+              persona: 'You are the SupraMAS Stage 1 strategy builder. Return the requested JSON handoff only.'
+              toolFilter:
+                allow:
+                  - supramas_paper_store
+                  - supramas_chunk_extract
+          - id: tool-subagent-reviewer
+            name: '@deepseek-ai/dsh-tool-subagent'
+            config:
+              provider: spawn
+              toolName: supramas_reviewer
+              enableRunInBackground: false
+              backgroundMode: one-shot
+              maxDepth: 1
+              persona: 'You are the SupraMAS Stage 1 evidence reviewer. Return the requested JSON decision only.'
+              toolFilter:
+                allow:
+                  - supramas_artifact_read
+                  - supramas_evidence_verify

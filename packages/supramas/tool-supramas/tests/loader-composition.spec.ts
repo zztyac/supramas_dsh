@@ -22,6 +22,7 @@ import {
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import SupraMasRuntime from '../../supramas/src/index.ts'
+import SupraMasArtifacts from '../../supramas-artifacts/src/index.ts'
 import * as ToolSupraMas from '../src/index.ts'
 
 let root: string | undefined
@@ -49,6 +50,9 @@ describe('SupraMAS real Loader composition', () => {
       "- name: '@deepseek-ai/dsh-system-prompt'",
       "- name: '@deepseek-ai/dsh-tools'",
       "- name: '@deepseek-ai/dsh-supramas'",
+      "- name: '@deepseek-ai/dsh-supramas-artifacts'",
+      '  config:',
+      `    root: ${JSON.stringify(root)}`,
       "- name: '@deepseek-ai/dsh-tool-supramas'",
       '',
     ].join('\n'))
@@ -75,6 +79,7 @@ describe('SupraMAS real Loader composition', () => {
       ['@deepseek-ai/dsh-system-prompt', SystemPrompt],
       ['@deepseek-ai/dsh-tools', ToolRuntime],
       ['@deepseek-ai/dsh-supramas', SupraMasRuntime],
+      ['@deepseek-ai/dsh-supramas-artifacts', SupraMasArtifacts],
       ['@deepseek-ai/dsh-tool-supramas', ToolSupraMas],
     ])
     ctx.loader.internal = {
@@ -98,6 +103,7 @@ describe('SupraMAS real Loader composition', () => {
       'supramas_stage1_builder_submit',
       'supramas_stage1_reviewer_submit',
       'supramas_stage1_finalize',
+      'supramas_artifacts_sync',
       'supramas_paper_store',
       'supramas_chunk_extract',
       'supramas_artifact_read',

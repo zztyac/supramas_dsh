@@ -19,9 +19,10 @@ import {
   type Stage1RunState,
 } from '@deepseek-ai/dsh-supramas'
 import '@deepseek-ai/dsh-supramas'
+import '@deepseek-ai/dsh-supramas-artifacts'
 
 export const name = 'tool-supramas'
-export const inject = ['tools', 'supramas']
+export const inject = ['tools', 'supramas', 'supramasArtifacts']
 
 interface ToolFailure {
   code: string
@@ -309,12 +310,12 @@ function stage1Envelope(state: Stage1RunState, summary: string): ToolEnvelope {
   }
 }
 
-function finalizedEnvelope(state: FinalizedStage1RunState): ToolEnvelope {
+function finalizedEnvelope(state: FinalizedStage1RunState, artifacts: string[]): ToolEnvelope {
   return {
     status: 'success',
     summary: `Completed Stage 1 workflow ${state.run.jobId}.`,
     next_actions: ['inspect_strategy_tree'],
-    artifacts: [state.run.runDir],
+    artifacts,
     data: {
       run: state.run,
       workflow: jsonObject(state.workflow),
@@ -471,6 +472,9 @@ export function apply(ctx: Context): void {
       research_topic: { type: 'string', required: true, description: 'Approved Stage 1 research topic.' },
       material_scope: { type: 'array', items: { type: 'string' }, description: 'Optional material search scope.' },
       target_property: { type: 'array', items: { type: 'string' }, description: 'Optional target properties.' },
+      evidence_policy: { type: 'string', description: 'Optional evidence acceptance policy preserved in input_task.yaml.' },
+      include: { type: 'array', items: { type: 'string' }, description: 'Optional Stage 1 search inclusion guidance.' },
+      exclude: { type: 'array', items: { type: 'string' }, description: 'Optional Stage 1 search exclusion guidance.' },
       max_depth: { type: 'integer', required: true, description: 'Maximum accepted child depth; zero keeps only roots.' },
       max_root_attempts: { type: 'integer', required: true, description: 'Real builder attempt budget for a root.' },
       max_child_attempts_per_limitation: {
@@ -496,6 +500,9 @@ export function apply(ctx: Context): void {
             researchTopic: args.research_topic,
             ...(args.material_scope === undefined ? {} : { materialScope: args.material_scope }),
             ...(args.target_property === undefined ? {} : { targetProperty: args.target_property }),
+            ...(args.evidence_policy === undefined ? {} : { evidencePolicy: args.evidence_policy }),
+            ...(args.include === undefined ? {} : { include: args.include }),
+            ...(args.exclude === undefined ? {} : { exclude: args.exclude }),
             maxDepth: args.max_depth,
             maxRootAttempts: args.max_root_attempts,
             maxChildAttemptsPerLimitation: args.max_child_attempts_per_limitation,
@@ -503,6 +510,7 @@ export function apply(ctx: Context): void {
             ...(args.target_child_nodes === undefined ? {} : { targetChildNodes: args.target_child_nodes }),
           },
         )
+        await ctx.supramasArtifacts.syncTask(state.run.id)
         return stage1Envelope(state, `Started Stage 1 workflow ${state.run.jobId}.`)
       })
     },
@@ -605,10 +613,42 @@ export function apply(ctx: Context): void {
     },
     output,
     async execute(args) {
-      return guard(async () => finalizedEnvelope(await ctx.supramas.finalizeStage1({
-        id: SupraMasRunId(args.run_id),
-        revision: args.revision,
-      })))
+      return guard(async () => {
+        const state = await ctx.supramas.finalizeStage1({
+          id: SupraMasRunId(args.run_id),
+          revision: args.revision,
+        })
+        const manifest = await ctx.supramasArtifacts.syncCompleted(state.run.id)
+        return finalizedEnvelope(state, manifest.files)
+      })
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'supramas_artifacts_sync',
+    description: 'Idempotently repair or refresh the Stage 1 compatibility files from durable state.',
+    parameters: {
+      run_id: { type: 'string', required: true, description: 'Owning deterministic SupraMAS run id.' },
+    },
+    output,
+    async execute(args) {
+      return guard(async () => {
+        const runId = SupraMasRunId(args.run_id)
+        const run = ctx.supramas.get(runId)
+        if (run === undefined) {
+          throw new SupraMasError(`SupraMAS run ${args.run_id} was not found.`, 'SUPRAMAS_RUN_NOT_FOUND')
+        }
+        const files = run.phase === 'completed'
+          ? (await ctx.supramasArtifacts.syncCompleted(runId)).files
+          : [await ctx.supramasArtifacts.syncTask(runId)]
+        return {
+          status: 'success',
+          summary: `Synchronized SupraMAS artifacts for ${run.jobId}.`,
+          next_actions: run.phase === 'completed' ? ['inspect_exported_artifacts'] : ['continue_run'],
+          artifacts: files,
+          data: { run },
+        }
+      })
     },
   }))
 
@@ -625,12 +665,14 @@ export function apply(ctx: Context): void {
     output,
     async execute(args) {
       return guard(async () => {
-        const artifact = await ctx.supramas.storePaper(SupraMasRunId(args.run_id), {
+        const runId = SupraMasRunId(args.run_id)
+        const artifact = await ctx.supramas.storePaper(runId, {
           paper_id: args.paper_id,
           paper_title: args.paper_title,
           local_path: args.local_path,
           source_type: args.source_type,
         })
+        await ctx.supramasArtifacts.syncPaper(runId, artifact.paper_id)
         return {
           status: 'success',
           summary: `Registered local paper ${artifact.paper_id}.`,
@@ -663,6 +705,7 @@ export function apply(ctx: Context): void {
         })
         const artifact = ctx.supramas.readPaper(runId, args.paper_id)
         if (artifact === undefined) throw new Error(`stored paper ${args.paper_id} disappeared`)
+        await ctx.supramasArtifacts.syncPaper(runId, args.paper_id)
         return {
           status: 'success',
           summary: `Stored evidence chunk ${chunk.chunk_id}.`,

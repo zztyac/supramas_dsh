@@ -9,7 +9,7 @@ kind: "package-bundle"
 
 ## 概述
 
-这个静态 profile patch 按依赖顺序向 DSH profile 加入持久 SupraMAS 能力、版本化浏览器 API、十三工具模型消费者和非技术型任务面板。它不改变 agent loop 行为，本身也不拥有运行时状态。
+这个静态 profile patch 按依赖顺序向 DSH profile 加入持久 SupraMAS 能力、兼容文件写入器、版本化浏览器 API、十四工具模型消费者和非技术型任务面板。它不改变 agent loop 行为，本身也不拥有运行时状态。
 
 ## 目录
 
@@ -37,7 +37,7 @@ pnpm dsh web --patch packages/bundle/supramas/cordis.patch.yml
 
 ## 实现说明
 
-`cordis.patch.yml` 依次插入运行时、Typert API、模型工具和浏览器 UI。运行时打开带版本的 `supramas` 存储领域；静态 bundle 本身仍不提供服务。
+`cordis.patch.yml` 依次插入运行时、工作区内的产物写入器、Typert API、模型工具和浏览器 UI。运行时打开带版本的 `supramas` 存储领域；产物写入器使用进程工作区作为根目录；静态 bundle 本身仍不提供服务。
 
 <a id="model-experience"></a>
 
@@ -47,7 +47,7 @@ pnpm dsh web --patch packages/bundle/supramas/cordis.patch.yml
 
 #### 模型看到什么
 
-carrier 本身不显示内容。插入的包贡献十三个 `supramas_*` 运行、证据和 Stage 1 工作流工具；角色白名单决定哪些 schema 可见。
+carrier 本身不显示内容。插入的包贡献十四个 `supramas_*` 运行、证据、导出修复和 Stage 1 工作流工具；角色白名单决定哪些 schema 可见。
 
 #### Token 影响
 

@@ -33,6 +33,7 @@ describe('SupraMAS role contracts', () => {
       'supramas_stage1_builder_submit',
       'supramas_stage1_reviewer_submit',
       'supramas_stage1_finalize',
+      'supramas_artifacts_sync',
       'supramas_builder',
       'supramas_reviewer',
     ])

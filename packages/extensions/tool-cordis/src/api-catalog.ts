@@ -2389,21 +2389,58 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'supramasArtifacts',
+    summary: 'Workspace-confined writer for the Codex-native Stage 1 file layout.',
+    description: 'Workspace-confined writer for the Codex-native Stage 1 file layout.',
+    methods: [
+      {
+        signature: 'syncTask(id: SupraMasRunIdBrand): Promise<string>',
+        description: 'Materialize the current approved task definition.',
+        parameters: [{ name: 'id', description: 'Owning durable run identity.' }],
+        returns: 'the canonical relative task path.',
+      },
+      {
+        signature: 'syncPaper(id: SupraMasRunIdBrand, paperId: string): Promise<string>',
+        description: 'Materialize one stored paper and its complete current chunk list.',
+        parameters: [{ name: 'id', description: 'Owning durable run identity.' }, { name: 'paperId', description: 'Stored paper identity.' }],
+        returns: 'the canonical relative paper path.',
+      },
+      {
+        signature: 'async outputStatus(id: SupraMasRunIdBrand): Promise<Stage1OutputStatus[]>',
+        description: 'Read final-output readiness without exposing the configured absolute root.',
+        parameters: [{ name: 'id', description: 'Owning durable run identity.' }],
+        returns: 'the three stable final output names in contract order.',
+      },
+      {
+        signature: 'syncCompleted(id: SupraMasRunIdBrand): Promise<Stage1ArtifactManifest>',
+        description: 'Idempotently materialize every compatibility artifact for a completed run.',
+        parameters: [{ name: 'id', description: 'Owning durable completed run identity.' }],
+        returns: 'the stable relative artifact manifest.',
+      },
+    ],
+  },
+  {
     key: 'supramasController',
     summary: 'Host service backing the generated `ctx.remote.supramas` namespace.',
     description: 'Host service backing the generated `ctx.remote.supramas` namespace.',
     methods: [
       {
-        signature: '@Remote // oxlint-disable-next-line typescript/require-await -- Remote handlers preserve an asynchronous transport contract. async list(): Promise<SupraMasRunListV1>',
+        signature: '@Remote list(): Promise<SupraMasRunListV1>',
         description: 'List every task in durable creation order.',
         parameters: [],
         returns: 'the versioned public task list.',
       },
       {
-        signature: '@Remote // oxlint-disable-next-line typescript/require-await -- Remote handlers preserve an asynchronous transport contract. async get(runId: string): Promise<SupraMasRunViewV1>',
+        signature: '@Remote get(runId: string): Promise<SupraMasRunViewV1>',
         description: 'Read one complete public task view.',
         parameters: [{ name: 'runId', description: 'Stable public run identity.' }],
         returns: 'the current versioned task view.',
+      },
+      {
+        signature: '@Remote async artifacts(runId: string): Promise<SupraMasArtifactsViewV1>',
+        description: 'Read the browser-safe readiness of the three canonical Stage 1 outputs.',
+        parameters: [{ name: 'runId', description: 'Stable public run identity.' }],
+        returns: 'fixed output names and readiness without Host paths.',
       },
       {
         signature: '@Remote async createStage1(request: SupraMasCreateStage1RequestV1): Promise<SupraMasRunViewV1>',
@@ -5521,6 +5558,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface SpillSource {\n    toolName: string;\n    callId: ToolCallId;\n    label: string;\n}',
   },
   {
+    name: 'Stage1ArtifactManifest',
+    declaration: 'export interface Stage1ArtifactManifest {\n    runId: SupraMasRunIdBrand;\n    files: string[];\n}',
+  },
+  {
     name: 'Stage1BuilderAttempt',
     declaration: 'export interface Stage1BuilderAttempt {\n    attempt_index: number;\n    scope: \'root\' | \'child\';\n    frontier_key?: string;\n    revision_round: number;\n    status: Stage1BuilderAttemptStatus;\n    paper_id?: string;\n    reason?: string;\n}',
   },
@@ -5543,6 +5584,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'Stage1NextAction',
     declaration: 'export type Stage1NextAction = {\n    kind: \'build_root\';\n    attempt_index: number;\n} | {\n    kind: \'build_child\';\n    parent_node_id: string;\n    parent_limitation_id: string;\n    parent_expectation: string;\n    attempt_index: number;\n    prior_attempts: Stage1BuilderAttempt[];\n} | {\n    kind: \'review_candidate\';\n    scope: \'root\' | \'child\';\n    attempt_index: number;\n    revision_round: number;\n    paper_id: string;\n} | {\n    kind: \'revise_candidate\';\n    scope: \'root\' | \'child\';\n    attempt_index: number;\n    revision_round: number;\n    paper_id: string;\n    critical_issues: Stage1ReviewFinding[];\n    edge_issues: Stage1ReviewFinding[];\n    acceptance_conditions: string[];\n} | {\n    kind: \'finalize\';\n} | {\n    kind: \'completed\';\n    tree: StrategyTree;\n} | {\n    kind: \'failed\';\n    reason: string;\n};',
+  },
+  {
+    name: 'Stage1OutputStatus',
+    declaration: 'export interface Stage1OutputStatus {\n    name: \'strategy_tree.json\' | \'node_review_log.jsonl\' | \'review_report.md\';\n    ready: boolean;\n}',
   },
   {
     name: 'Stage1PendingCandidate',
@@ -5574,7 +5619,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'Stage1WorkflowConfig',
-    declaration: 'export interface Stage1WorkflowConfig {\n    jobId: string;\n    researchTopic: string;\n    materialScope?: string[];\n    targetProperty?: string[];\n    maxDepth: number;\n    maxRootAttempts: number;\n    maxChildAttemptsPerLimitation: number;\n    maxBranchPerNode?: number | null;\n    targetChildNodes?: number | null;\n}',
+    declaration: 'export interface Stage1WorkflowConfig {\n    jobId: string;\n    researchTopic: string;\n    materialScope?: string[];\n    targetProperty?: string[];\n    evidencePolicy?: string;\n    include?: string[];\n    exclude?: string[];\n    maxDepth: number;\n    maxRootAttempts: number;\n    maxChildAttemptsPerLimitation: number;\n    maxBranchPerNode?: number | null;\n    targetChildNodes?: number | null;\n}',
   },
   {
     name: 'Stage1WorkflowStatus',
@@ -5761,12 +5806,20 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface SubprocessTerminalSpawnSpec {\n    argv: readonly string[];\n    cwd: string;\n    env?: Record<string, string> | undefined;\n    rows: number;\n    cols: number;\n    graceMs: number;\n    signal?: AbortSignal | undefined;\n}',
   },
   {
+    name: 'SupraMasArtifactsViewV1',
+    declaration: 'export interface SupraMasArtifactsViewV1 {\n    readonly apiVersion: typeof SUPRAMAS_API_VERSION;\n    readonly runId: string;\n    readonly ready: boolean;\n    readonly files: readonly SupraMasOutputFileV1[];\n}',
+  },
+  {
     name: 'SupraMasCreateStage1RequestV1',
-    declaration: 'export interface SupraMasCreateStage1RequestV1 {\n    readonly jobId?: string;\n    readonly researchTopic: string;\n    readonly materialScope?: readonly string[];\n    readonly targetProperty?: readonly string[];\n    readonly maxDepth?: number;\n    readonly maxRootAttempts?: number;\n    readonly maxChildAttemptsPerLimitation?: number;\n    readonly maxBranchPerNode?: number | null;\n    readonly targetChildNodes?: number | null;\n}',
+    declaration: 'export interface SupraMasCreateStage1RequestV1 {\n    readonly jobId?: string;\n    readonly researchTopic: string;\n    readonly materialScope?: readonly string[];\n    readonly targetProperty?: readonly string[];\n    readonly evidencePolicy?: string;\n    readonly include?: readonly string[];\n    readonly exclude?: readonly string[];\n    readonly maxDepth?: number;\n    readonly maxRootAttempts?: number;\n    readonly maxChildAttemptsPerLimitation?: number;\n    readonly maxBranchPerNode?: number | null;\n    readonly targetChildNodes?: number | null;\n}',
   },
   {
     name: 'SupraMasNextActionV1',
     declaration: 'export type SupraMasNextActionV1 = {\n    readonly kind: \'build_root\';\n    readonly attemptIndex: number;\n} | {\n    readonly kind: \'build_child\';\n    readonly parentNodeId: string;\n    readonly parentLimitationId: string;\n    readonly parentExpectation: string;\n    readonly attemptIndex: number;\n} | {\n    readonly kind: \'review_candidate\';\n    readonly scope: \'root\' | \'child\';\n    readonly attemptIndex: number;\n    readonly revisionRound: number;\n    readonly paperId: string;\n} | {\n    readonly kind: \'revise_candidate\';\n    readonly scope: \'root\' | \'child\';\n    readonly attemptIndex: number;\n    readonly revisionRound: number;\n    readonly paperId: string;\n    readonly criticalIssueCount: number;\n    readonly edgeIssueCount: number;\n    readonly acceptanceConditionCount: number;\n} | {\n    readonly kind: \'finalize\';\n} | {\n    readonly kind: \'completed\';\n} | {\n    readonly kind: \'failed\';\n    readonly reason: string;\n};',
+  },
+  {
+    name: 'SupraMasOutputFileV1',
+    declaration: 'export interface SupraMasOutputFileV1 {\n    readonly name: \'strategy_tree.json\' | \'node_review_log.jsonl\' | \'review_report.md\';\n    readonly ready: boolean;\n}',
   },
   {
     name: 'SupraMasRunFailureViewV1',
@@ -5775,6 +5828,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'SupraMasRunId',
     declaration: 'export type SupraMasRunId = Branded<\'SupraMasRunId\'>;',
+  },
+  {
+    name: 'SupraMasRunIdBrand',
+    declaration: 'export type SupraMasRunIdBrand = SupraMasRunId;',
   },
   {
     name: 'SupraMasRunListV1',

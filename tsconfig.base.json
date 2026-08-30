@@ -489,6 +489,8 @@
       "@deepseek-ai/dsh-subprocess-local/invariant": ["./packages/subprocess/subprocess-local/src/invariant.ts"],
       "@deepseek-ai/dsh-supramas": ["./packages/supramas/supramas/src"],
       "@deepseek-ai/dsh-supramas/invariant": ["./packages/supramas/supramas/src/invariant.ts"],
+      "@deepseek-ai/dsh-supramas-artifacts": ["./packages/supramas/supramas-artifacts/src"],
+      "@deepseek-ai/dsh-supramas-artifacts/invariant": ["./packages/supramas/supramas-artifacts/src/invariant.ts"],
       "@deepseek-ai/dsh-supramas-domain": ["./packages/supramas/supramas-domain/src"],
       "@deepseek-ai/dsh-supramas-domain/invariant": ["./packages/supramas/supramas-domain/src/invariant.ts"],
       "@deepseek-ai/dsh-system-prompt": ["./packages/core/system-prompt/src"],

@@ -58,6 +58,9 @@ export interface Stage1WorkflowConfig {
   researchTopic: string
   materialScope?: string[]
   targetProperty?: string[]
+  evidencePolicy?: string
+  include?: string[]
+  exclude?: string[]
   maxDepth: number
   maxRootAttempts: number
   maxChildAttemptsPerLimitation: number
@@ -418,6 +421,15 @@ export function createStage1Workflow(config: Stage1WorkflowConfig): Stage1Workfl
     ...(config.targetProperty === undefined
       ? {}
       : { targetProperty: stringList(config.targetProperty, 'workflow.targetProperty') }),
+    ...(config.evidencePolicy === undefined
+      ? {}
+      : { evidencePolicy: nonempty(config.evidencePolicy, 'workflow.evidencePolicy') }),
+    ...(config.include === undefined
+      ? {}
+      : { include: stringList(config.include, 'workflow.include') }),
+    ...(config.exclude === undefined
+      ? {}
+      : { exclude: stringList(config.exclude, 'workflow.exclude') }),
     maxDepth: nonnegativeInteger(config.maxDepth, 'workflow.maxDepth'),
     maxRootAttempts: positiveInteger(config.maxRootAttempts, 'workflow.maxRootAttempts'),
     maxChildAttemptsPerLimitation: positiveInteger(

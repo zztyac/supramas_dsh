@@ -10,11 +10,11 @@ The durable Stage 1 runtime and model-facing tools could execute the migrated wo
 
 ## Decision
 
-`@deepseek-ai/dsh-api-supramas` owns one versioned Typert Remote namespace. Its V1 projection contains task identity, lifecycle, limits, progress, and the next durable action, while excluding run directories, task-file paths, evidence paths, and internal workflow payloads. Create, resume, and cancel delegate to the existing runtime and preserve compare-and-set revisions. Stable failure codes let the browser distinguish malformed input, duplicate jobs, missing runs, stale revisions, and illegal transitions.
+`@deepseek-ai/dsh-api-supramas` owns one versioned Typert Remote namespace. Its V1 projection contains task identity, lifecycle, limits, progress, the next durable action, and final-output readiness, while excluding run directories, task-file paths, evidence paths, and internal workflow payloads. Create, resume, and cancel delegate to the existing runtime and preserve compare-and-set revisions. Stable failure codes let the browser distinguish malformed input, duplicate jobs, missing runs, stale revisions, and illegal transitions.
 
 `@deepseek-ai/dsh-client-ui-supramas` registers a root-scoped material-task entry in the Web sidebar. The panel accepts a research goal, material scope, target properties, and depth, then creates the durable task through the Remote boundary. It queues one bounded coordinator message through the current Session only after creation succeeds. Without an open session, the task remains durable and the UI explains how to dispatch it later.
 
-The UI owns no workflow mirror. Every refresh reads the Host projection, and resume/cancel submit the last displayed revision. The profile bundle mounts the runtime, API, model tool, and browser UI in that order.
+The UI owns no workflow mirror. Every refresh reads the Host projection, and resume/cancel submit the last displayed revision. The profile bundle mounts the runtime, artifact writer, API, model tool, and browser UI in that order.
 
 ## Alternatives considered
 

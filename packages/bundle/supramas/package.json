@@ -25,6 +25,7 @@
     "@deepseek-ai/dsh-api-supramas": "workspace:^",
     "@deepseek-ai/dsh-client-ui-supramas": "workspace:^",
     "@deepseek-ai/dsh-supramas": "workspace:^",
+    "@deepseek-ai/dsh-supramas-artifacts": "workspace:^",
     "@deepseek-ai/dsh-tool-supramas": "workspace:^"
   },
   "peerDependencies": {

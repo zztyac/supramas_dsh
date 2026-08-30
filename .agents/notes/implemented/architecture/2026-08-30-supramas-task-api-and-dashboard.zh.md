@@ -10,11 +10,11 @@ Status: implemented
 
 ## 决策
 
-`@deepseek-ai/dsh-api-supramas` 管理唯一的版本化 Typert Remote namespace。V1 投影包含任务标识、生命周期、限制、进度和下一项持久动作，同时排除运行目录、任务文件路径、证据路径和内部工作流载荷。创建、恢复和取消全部委托给现有运行时，并保留比较并交换 revision。稳定错误代码让浏览器能够区分格式错误、重复 job、运行不存在、旧 revision 和非法转换。
+`@deepseek-ai/dsh-api-supramas` 管理唯一的版本化 Typert Remote namespace。V1 投影包含任务标识、生命周期、限制、进度、下一项持久动作和最终输出就绪状态，同时排除运行目录、任务文件路径、证据路径和内部工作流载荷。创建、恢复和取消全部委托给现有运行时，并保留比较并交换 revision。稳定错误代码让浏览器能够区分格式错误、重复 job、运行不存在、旧 revision 和非法转换。
 
 `@deepseek-ai/dsh-client-ui-supramas` 在 Web 左侧栏注册根作用域材料任务入口。面板接收研究目标、材料范围、目标性能和深度，再通过 Remote 边界创建持久任务。只有创建成功后，才会通过当前 Session 加入一条有界 coordinator 消息。如果没有打开的会话，任务仍保持持久，UI 会说明如何稍后派发。
 
-UI 不拥有工作流镜像。每次刷新都读取 Host 投影，恢复和取消提交最后显示的 revision。Profile bundle 按运行时、API、模型工具和浏览器 UI 的顺序挂载。
+UI 不拥有工作流镜像。每次刷新都读取 Host 投影，恢复和取消提交最后显示的 revision。Profile bundle 按运行时、产物写入器、API、模型工具和浏览器 UI 的顺序挂载。
 
 ## 考虑过的替代方案
 

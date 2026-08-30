@@ -9,9 +9,11 @@ import {
   type Stage1NextAction,
   type Stage1RunState,
 } from '@deepseek-ai/dsh-supramas'
+import '@deepseek-ai/dsh-supramas-artifacts'
 import { Remote, TypertRemoteFailure, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import {
   SUPRAMAS_API_VERSION,
+  type SupraMasArtifactsViewV1,
   type SupraMasCreateStage1RequestV1,
   type SupraMasNextActionV1,
   type SupraMasRunListV1,
@@ -31,6 +33,9 @@ interface NormalizedCreateRequest {
   readonly researchTopic: string
   readonly materialScope: string[]
   readonly targetProperty: string[]
+  readonly evidencePolicy?: string
+  readonly include?: string[]
+  readonly exclude?: string[]
   readonly maxDepth: number
   readonly maxRootAttempts: number
   readonly maxChildAttemptsPerLimitation: number
@@ -83,11 +88,16 @@ function normalizeCreate(request: SupraMasCreateStage1RequestV1, generatedJobId:
     researchTopic: nonempty(request.researchTopic, 'researchTopic'),
     materialScope: stringList(request.materialScope, 'materialScope'),
     targetProperty: stringList(request.targetProperty, 'targetProperty'),
-    maxDepth: integer(request.maxDepth, 2, 'maxDepth', 0),
+    ...(request.evidencePolicy === undefined
+      ? {}
+      : { evidencePolicy: nonempty(request.evidencePolicy, 'evidencePolicy') }),
+    ...(request.include === undefined ? {} : { include: stringList(request.include, 'include') }),
+    ...(request.exclude === undefined ? {} : { exclude: stringList(request.exclude, 'exclude') }),
+    maxDepth: integer(request.maxDepth, 3, 'maxDepth', 0),
     maxRootAttempts: integer(request.maxRootAttempts, 3, 'maxRootAttempts', 1),
     maxChildAttemptsPerLimitation: integer(
       request.maxChildAttemptsPerLimitation,
-      2,
+      3,
       'maxChildAttemptsPerLimitation',
       1,
     ),
@@ -172,7 +182,7 @@ function stage1View(state: Stage1RunState): SupraMasStage1ViewV1 {
 
 /** Host service backing the generated `ctx.remote.supramas` namespace. */
 export class SupraMasController extends TypertRemoteService {
-  static inject = ['supramas']
+  static inject = ['supramas', 'supramasArtifacts']
 
   private generatedSequence = 0
 
@@ -208,6 +218,24 @@ export class SupraMasController extends TypertRemoteService {
   }
 
   /**
+   * Read the browser-safe readiness of the three canonical Stage 1 outputs.
+   * @param runId - Stable public run identity.
+   * @returns fixed output names and readiness without Host paths.
+   */
+  @Remote
+  async artifacts(runId: string): Promise<SupraMasArtifactsViewV1> {
+    const id = this.runId(runId)
+    if (this.ctx.supramas.get(id) === undefined) throw this.notFound(runId)
+    const files = await this.ctx.supramasArtifacts.outputStatus(id)
+    return {
+      apiVersion: SUPRAMAS_API_VERSION,
+      runId,
+      ready: files.every(file => file.ready),
+      files,
+    }
+  }
+
+  /**
    * Create a task, approve its normalized task definition, and start Stage 1.
    * @param request - User-facing Stage 1 scope and optional execution limits.
    * @returns the committed task after Stage 1 starts.
@@ -227,12 +255,16 @@ export class SupraMasController extends TypertRemoteService {
         researchTopic: normalized.researchTopic,
         materialScope: normalized.materialScope,
         targetProperty: normalized.targetProperty,
+        ...(normalized.evidencePolicy === undefined ? {} : { evidencePolicy: normalized.evidencePolicy }),
+        ...(normalized.include === undefined ? {} : { include: normalized.include }),
+        ...(normalized.exclude === undefined ? {} : { exclude: normalized.exclude }),
         maxDepth: normalized.maxDepth,
         maxRootAttempts: normalized.maxRootAttempts,
         maxChildAttemptsPerLimitation: normalized.maxChildAttemptsPerLimitation,
         maxBranchPerNode: normalized.maxBranchPerNode,
         targetChildNodes: normalized.targetChildNodes,
       })
+      await this.ctx.supramasArtifacts.syncTask(started.run.id)
       return this.view(started.run)
     } catch (error: unknown) {
       throw this.mapFailure(error, { jobId: normalized.jobId })

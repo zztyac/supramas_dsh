@@ -18,9 +18,13 @@ SupraMAS 是叠加在 DSH 上的材料科学扩展接缝。它负责持久研究
 
 持久下一动作只会选择一个合法步骤：构建根节点、针对开放限制构建子节点、审查候选、依据审查意见修订、完成导出，或报告终态结果。builder 提出有证据支撑的候选，reviewer 接受、修订或拒绝；coordinator 在继续前持久化每次交接。
 
+## 兼容文件
+
+`ctx.supramasArtifacts` 把持久工作流投影为 `runs/<jobId>/input_task.yaml`、论文 JSON 文件、`tree_state.json` 和三项最终成果。它把每条路径限制在一个配置好的工作区根目录内，并原子替换完整文件。持久状态始终是权威来源：调用方通过重复同步修复部分或中断的导出，不回退已完成运行。
+
 ## 浏览器边界
 
-V1 Remote 视图公开任务标识、生命周期状态、限制、汇总进度和下一动作，并有意隐藏 Host 文件系统路径与内部工作流载荷。非技术型任务面板通过这个边界创建和控制任务，再向活动 SupraMAS 会话加入一条有界协调消息。
+V1 Remote 视图公开任务标识、生命周期状态、限制、汇总进度、下一动作和三项最终成果的浏览器安全就绪状态，并有意隐藏 Host 文件系统路径与内部工作流载荷。非技术型任务面板通过这个边界创建和控制任务，再向活动 SupraMAS 会话加入一条有界协调消息。
 
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
@@ -140,6 +144,45 @@ transition(ref: RunRef, request: TransitionRunRequest): Promise<RunSnapshot>
 
 Source: [`packages/supramas/supramas/src/index.ts`](../../packages/supramas/supramas/src/index.ts)
 
+<a id="ctxsupramasartifacts--supramasartifacts"></a>
+
+### `ctx.supramasArtifacts` — `SupraMasArtifacts`
+
+Workspace-confined writer for the Codex-native Stage 1 file layout.
+
+```ts cordis-catalog
+/**
+ * Materialize the current approved task definition.
+ * @param id - Owning durable run identity.
+ * @returns the canonical relative task path.
+ */
+syncTask(id: SupraMasRunIdBrand): Promise<string>
+
+/**
+ * Materialize one stored paper and its complete current chunk list.
+ * @param id - Owning durable run identity.
+ * @param paperId - Stored paper identity.
+ * @returns the canonical relative paper path.
+ */
+syncPaper(id: SupraMasRunIdBrand, paperId: string): Promise<string>
+
+/**
+ * Read final-output readiness without exposing the configured absolute root.
+ * @param id - Owning durable run identity.
+ * @returns the three stable final output names in contract order.
+ */
+async outputStatus(id: SupraMasRunIdBrand): Promise<Stage1OutputStatus[]>
+
+/**
+ * Idempotently materialize every compatibility artifact for a completed run.
+ * @param id - Owning durable completed run identity.
+ * @returns the stable relative artifact manifest.
+ */
+syncCompleted(id: SupraMasRunIdBrand): Promise<Stage1ArtifactManifest>
+```
+
+Source: [`packages/supramas/supramas-artifacts/src/index.ts`](../../packages/supramas/supramas-artifacts/src/index.ts)
+
 <a id="ctxsupramascontroller--supramascontroller"></a>
 
 ### `ctx.supramasController` — `SupraMasController`
@@ -149,16 +192,23 @@ Host service backing the generated `ctx.remote.supramas` namespace.
 ```ts cordis-catalog
 /**
  * List every task in durable creation order.
- * @returns the versioned public task list.
- */
-@Remote // oxlint-disable-next-line typescript/require-await -- Remote handlers preserve an asynchronous transport contract. async list(): Promise<SupraMasRunListV1>
+* @returns the versioned public task list.
+*/
+@Remote list(): Promise<SupraMasRunListV1>
 
 /**
  * Read one complete public task view.
  * @param runId - Stable public run identity.
- * @returns the current versioned task view.
+* @returns the current versioned task view.
+*/
+@Remote get(runId: string): Promise<SupraMasRunViewV1>
+
+/**
+ * Read the browser-safe readiness of the three canonical Stage 1 outputs.
+ * @param runId - Stable public run identity.
+ * @returns fixed output names and readiness without Host paths.
  */
-@Remote // oxlint-disable-next-line typescript/require-await -- Remote handlers preserve an asynchronous transport contract. async get(runId: string): Promise<SupraMasRunViewV1>
+@Remote async artifacts(runId: string): Promise<SupraMasArtifactsViewV1>
 
 /**
  * Create a task, approve its normalized task definition, and start Stage 1.

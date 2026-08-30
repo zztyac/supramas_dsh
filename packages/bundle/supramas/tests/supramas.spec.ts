@@ -20,6 +20,11 @@ describe('dsh-supramas bundle', () => {
     const rows = parsed.flatMap(patch => patch.insert ?? [])
     expect(rows).toEqual([
       { id: 'supramas-runtime', name: '@deepseek-ai/dsh-supramas' },
+      {
+        id: 'supramas-artifacts',
+        name: '@deepseek-ai/dsh-supramas-artifacts',
+        config: { root: { __jsExpr: 'process.cwd()' } },
+      },
       { id: 'api-supramas', name: '@deepseek-ai/dsh-api-supramas' },
       { id: 'tool-supramas', name: '@deepseek-ai/dsh-tool-supramas' },
       { id: 'client-ui-supramas', name: '@deepseek-ai/dsh-client-ui-supramas' },
@@ -28,6 +33,7 @@ describe('dsh-supramas bundle', () => {
       '@deepseek-ai/dsh-api-supramas': 'workspace:^',
       '@deepseek-ai/dsh-client-ui-supramas': 'workspace:^',
       '@deepseek-ai/dsh-supramas': 'workspace:^',
+      '@deepseek-ai/dsh-supramas-artifacts': 'workspace:^',
       '@deepseek-ai/dsh-tool-supramas': 'workspace:^',
     })
   })

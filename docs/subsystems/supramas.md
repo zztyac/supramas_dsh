@@ -18,9 +18,13 @@ Each paper artifact belongs to one run and carries a stable local provenance pat
 
 The durable next action selects one legal step: build a root, build a child for an open limitation, review a candidate, revise from reviewer findings, finalize, or report a terminal outcome. Builders propose evidence-grounded candidates; reviewers accept, revise, or reject them; the coordinator persists every handoff before continuing.
 
+## Compatibility files
+
+`ctx.supramasArtifacts` projects the durable workflow into `runs/<jobId>/input_task.yaml`, paper JSON files, `tree_state.json`, and the three final outputs. It confines every path to one configured workspace root and atomically replaces complete files. Durable state remains authoritative: callers repair a partial or interrupted export by repeating synchronization instead of rolling back a completed run.
+
 ## Browser boundary
 
-The V1 Remote view exposes task identity, lifecycle state, limits, aggregate progress, and the next action. It intentionally omits host filesystem paths and internal workflow payloads. The non-technical dashboard creates and controls tasks through that boundary, then queues a bounded coordinator message into the active SupraMAS Session.
+The V1 Remote view exposes task identity, lifecycle state, limits, aggregate progress, the next action, and browser-safe readiness for the three final outputs. It intentionally omits host filesystem paths and internal workflow payloads. The non-technical dashboard creates and controls tasks through that boundary, then queues a bounded coordinator message into the active SupraMAS Session.
 
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
@@ -140,6 +144,45 @@ transition(ref: RunRef, request: TransitionRunRequest): Promise<RunSnapshot>
 
 Source: [`packages/supramas/supramas/src/index.ts`](../../packages/supramas/supramas/src/index.ts)
 
+<a id="ctxsupramasartifacts--supramasartifacts"></a>
+
+### `ctx.supramasArtifacts` — `SupraMasArtifacts`
+
+Workspace-confined writer for the Codex-native Stage 1 file layout.
+
+```ts cordis-catalog
+/**
+ * Materialize the current approved task definition.
+ * @param id - Owning durable run identity.
+ * @returns the canonical relative task path.
+ */
+syncTask(id: SupraMasRunIdBrand): Promise<string>
+
+/**
+ * Materialize one stored paper and its complete current chunk list.
+ * @param id - Owning durable run identity.
+ * @param paperId - Stored paper identity.
+ * @returns the canonical relative paper path.
+ */
+syncPaper(id: SupraMasRunIdBrand, paperId: string): Promise<string>
+
+/**
+ * Read final-output readiness without exposing the configured absolute root.
+ * @param id - Owning durable run identity.
+ * @returns the three stable final output names in contract order.
+ */
+async outputStatus(id: SupraMasRunIdBrand): Promise<Stage1OutputStatus[]>
+
+/**
+ * Idempotently materialize every compatibility artifact for a completed run.
+ * @param id - Owning durable completed run identity.
+ * @returns the stable relative artifact manifest.
+ */
+syncCompleted(id: SupraMasRunIdBrand): Promise<Stage1ArtifactManifest>
+```
+
+Source: [`packages/supramas/supramas-artifacts/src/index.ts`](../../packages/supramas/supramas-artifacts/src/index.ts)
+
 <a id="ctxsupramascontroller--supramascontroller"></a>
 
 ### `ctx.supramasController` — `SupraMasController`
@@ -149,16 +192,23 @@ Host service backing the generated `ctx.remote.supramas` namespace.
 ```ts cordis-catalog
 /**
  * List every task in durable creation order.
- * @returns the versioned public task list.
- */
-@Remote // oxlint-disable-next-line typescript/require-await -- Remote handlers preserve an asynchronous transport contract. async list(): Promise<SupraMasRunListV1>
+* @returns the versioned public task list.
+*/
+@Remote list(): Promise<SupraMasRunListV1>
 
 /**
  * Read one complete public task view.
  * @param runId - Stable public run identity.
- * @returns the current versioned task view.
+* @returns the current versioned task view.
+*/
+@Remote get(runId: string): Promise<SupraMasRunViewV1>
+
+/**
+ * Read the browser-safe readiness of the three canonical Stage 1 outputs.
+ * @param runId - Stable public run identity.
+ * @returns fixed output names and readiness without Host paths.
  */
-@Remote // oxlint-disable-next-line typescript/require-await -- Remote handlers preserve an asynchronous transport contract. async get(runId: string): Promise<SupraMasRunViewV1>
+@Remote async artifacts(runId: string): Promise<SupraMasArtifactsViewV1>
 
 /**
  * Create a task, approve its normalized task definition, and start Stage 1.

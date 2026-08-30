@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-This consumer exposes thirteen tools over `ctx.supramas`: four run controls, five durable Stage 1 workflow controls, and four evidence controls. Every tool validates arguments and returns the same stable success or recovery envelope; workflow responses include structured `workflow`, `next_action`, and final `tree` data.
+This consumer exposes fourteen tools over the SupraMAS services: four run controls, five durable Stage 1 workflow controls, one compatibility-file repair control, and four evidence controls. Every tool validates arguments and returns the same stable success or recovery envelope; workflow responses include structured `workflow`, `next_action`, and final `tree` data.
 
 ## Table of Contents
 
@@ -21,11 +21,11 @@ This consumer exposes thirteen tools over `ctx.supramas`: four run controls, fiv
 
 ## Use this package
 
-Compose it after `@deepseek-ai/dsh-tools`, the DSH storage stack, and `@deepseek-ai/dsh-supramas`. Model arguments remain snake-case. The coordinator owns `supramas_stage1_*`; builders use paper/chunk tools; reviewers use artifact read/evidence verify. The shipped preset exposes separate foreground `supramas_builder` and `supramas_reviewer` subagents with enforced tool filters.
+Compose it after `@deepseek-ai/dsh-tools`, the DSH storage stack, `@deepseek-ai/dsh-supramas`, and `@deepseek-ai/dsh-supramas-artifacts`. Model arguments remain snake-case. The coordinator owns `supramas_stage1_*` and `supramas_artifacts_sync`; builders use paper/chunk tools; reviewers use artifact read/evidence verify. The shipped preset exposes separate foreground `supramas_builder` and `supramas_reviewer` subagents with enforced tool filters.
 
 ## Understand the implementation
 
-`src/index.ts` owns all thirteen schemas and maps runtime and domain failures to root-cause, safe-retry, and stop-condition guidance. Every workflow mutation requires the exact revision returned by the preceding call. Domain failures remain successful tool transport values; unexpected programming faults still throw. The Cordis disposer removes all tools during HMR.
+`src/index.ts` owns all fourteen schemas and maps runtime and domain failures to root-cause, safe-retry, and stop-condition guidance. Finalization exports the file contract, while `supramas_artifacts_sync` repairs an interrupted export from durable state. Every workflow mutation requires the exact revision returned by the preceding call. Domain failures remain successful tool transport values; unexpected programming faults still throw. The Cordis disposer removes all tools during HMR.
 
 ## Model Experience
 
@@ -33,7 +33,7 @@ Compose it after `@deepseek-ai/dsh-tools`, the DSH storage stack, and `@deepseek
 
 #### What the model sees
 
-Only tools allowed for the selected role. `supramas_run_list` provides restart discovery, `supramas_artifact_read` returns one paper's stored chunks, and verification returns a small proof.
+Only tools allowed for the selected role. `supramas_run_list` provides restart discovery, `supramas_artifacts_sync` repairs compatibility files, `supramas_artifact_read` returns one paper's stored chunks, and verification returns a small proof.
 
 #### Token effect
 

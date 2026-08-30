@@ -1,6 +1,6 @@
 # Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
-#   pnpm run verify-translation-pairing --write docs/subsystems/supramas.md
-supramas.md: 1d382f13b31dcbedf00d60aa0e0c417963338a9b
-supramas.zh.md: dbf3228224e81361a62a9392e57841d9d19cff0a
+#   pnpm run verify-translation-pairing --write packages/supramas/supramas-artifacts/README.md
+README.md: 438d6e7cd56366d6ca74656fe32033878254516d
+README.zh.md: 9fa8cf62a77d5f0f03e5dcfdee4d7272f7f0d89e

@@ -2541,6 +2541,22 @@ export interface Config {
 
 来源：[`packages/e2b/subprocess-e2b/src/index.ts:25`](../packages/e2b/subprocess-e2b/src/index.ts)
 
+<a id="deepseek-aidsh-supramas-artifacts"></a>
+
+## `@deepseek-ai/dsh-supramas-artifacts`
+
+需要：`supramas`
+
+```ts config-catalog
+/** Plugin configuration for one workspace-confined compatibility export root. */
+export interface Config {
+  /** Absolute directory under which canonical `runs/<job_id>` paths are materialized. */
+  root: string
+}
+```
+
+来源：[`packages/supramas/supramas-artifacts/src/index.ts:20`](../packages/supramas/supramas-artifacts/src/index.ts)
+
 <a id="deepseek-aidsh-system-prompt"></a>
 
 ## `@deepseek-ai/dsh-system-prompt`
@@ -3408,7 +3424,7 @@ export interface Config {
 - `@deepseek-ai/dsh-acp-app` — 需要 `cmdlineArgs`（[`packages/bundle/acp-app/src/index.ts`](../packages/bundle/acp-app/src/index.ts)）
 - `@deepseek-ai/dsh-agent`（[`packages/core/agent/src/index.ts`](../packages/core/agent/src/index.ts)）
 - `@deepseek-ai/dsh-api-remotes` — 需要 `typertGateway`（[`packages/api/remotes/src/index.ts`](../packages/api/remotes/src/index.ts)）
-- `@deepseek-ai/dsh-api-supramas` — 需要 `supramas`（[`packages/supramas/api-supramas/src/index.ts`](../packages/supramas/api-supramas/src/index.ts)）
+- `@deepseek-ai/dsh-api-supramas` — 需要 `supramas` · `supramasArtifacts`（[`packages/supramas/api-supramas/src/index.ts`](../packages/supramas/api-supramas/src/index.ts)）
 - `@deepseek-ai/dsh-api-workspace-controller` — 需要 `typert` · `workspaceRegistry`（[`packages/api/workspace-controller/src/index.ts`](../packages/api/workspace-controller/src/index.ts)）
 - `@deepseek-ai/dsh-authorization` — 需要 `credentials`（[`packages/credentials/authorization/src/index.ts`](../packages/credentials/authorization/src/index.ts)）
 - `@deepseek-ai/dsh-client-locale`（[`packages/client/locale/src/index.ts`](../packages/client/locale/src/index.ts)）
@@ -3480,7 +3496,7 @@ export interface Config {
 - `@deepseek-ai/dsh-tool-call-timeout-policy` — 需要 `tools`（[`packages/guard/timeout-policy/src/index.ts`](../packages/guard/timeout-policy/src/index.ts)）
 - `@deepseek-ai/dsh-tool-cordis` — 需要 `tools` · `systemPrompt` · `dynamicCordisRunner` · `cordisInspect`（[`packages/extensions/tool-cordis/src/index.ts`](../packages/extensions/tool-cordis/src/index.ts)）
 - `@deepseek-ai/dsh-tool-subagent-control` — 需要 `tools` · `subagents`（[`packages/subagent/tool-subagent-control/src/index.ts`](../packages/subagent/tool-subagent-control/src/index.ts)）
-- `@deepseek-ai/dsh-tool-supramas` — 需要 `tools` · `supramas`（[`packages/supramas/tool-supramas/src/index.ts`](../packages/supramas/tool-supramas/src/index.ts)）
+- `@deepseek-ai/dsh-tool-supramas` — 需要 `tools` · `supramas` · `supramasArtifacts`（[`packages/supramas/tool-supramas/src/index.ts`](../packages/supramas/tool-supramas/src/index.ts)）
 - `@deepseek-ai/dsh-user-questions`（[`packages/interaction/user-questions/src/index.ts`](../packages/interaction/user-questions/src/index.ts)）
 - `@deepseek-ai/dsh-webhook` — 需要 `agents` · `agentDefaultModel` · `agentPresets` · `permissionPresets` · `sessionTitle` · `workspaceRegistry`（[`packages/webhook/webhook/src/index.ts`](../packages/webhook/webhook/src/index.ts)）
 - `@deepseek-ai/dsh-workspace` — 需要 `storageDomain` · `sessionPersistence`（[`packages/workspace/workspace/src/index.ts`](../packages/workspace/workspace/src/index.ts)）

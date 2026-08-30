@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-This static profile patch adds the durable SupraMAS capability, versioned browser API, thirteen-tool model consumer, and non-technical task dashboard to a DSH profile in dependency order. It changes no agent-loop behavior and owns no runtime state itself.
+This static profile patch adds the durable SupraMAS capability, compatibility-file writer, versioned browser API, fourteen-tool model consumer, and non-technical task dashboard to a DSH profile in dependency order. It changes no agent-loop behavior and owns no runtime state itself.
 
 ## Table of Contents
 
@@ -33,7 +33,7 @@ pnpm dsh web --patch packages/bundle/supramas/cordis.patch.yml
 
 ## Understand the implementation
 
-`cordis.patch.yml` inserts the runtime, Typert API, model tool, and browser UI in that order. The runtime opens the versioned `supramas` storage domain; the static bundle itself still owns no service.
+`cordis.patch.yml` inserts the runtime, workspace-confined artifact writer, Typert API, model tool, and browser UI in that order. The runtime opens the versioned `supramas` storage domain; the artifact writer uses the process workspace as its root; the static bundle itself still owns no service.
 
 ## Model Experience
 
@@ -41,7 +41,7 @@ pnpm dsh web --patch packages/bundle/supramas/cordis.patch.yml
 
 #### What the model sees
 
-Nothing from the carrier itself. Inserted packages contribute thirteen `supramas_*` run, evidence, and Stage 1 workflow tools; role allowlists determine which schemas are visible.
+Nothing from the carrier itself. Inserted packages contribute fourteen `supramas_*` run, evidence, export-repair, and Stage 1 workflow tools; role allowlists determine which schemas are visible.
 
 #### Token effect
 

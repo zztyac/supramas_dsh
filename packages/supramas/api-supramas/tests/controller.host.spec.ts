@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
@@ -23,15 +23,17 @@ import SupraMasRuntime, {
   type Stage1NextAction,
   type Stage1RunState,
 } from '@deepseek-ai/dsh-supramas'
+import SupraMasArtifacts from '../../supramas-artifacts/src/index.ts'
 import { TypertRemoteFailure, remoteMethods } from '@deepseek-ai/dsh-typert-protocol'
 import SupraMasController from '../src/index.ts'
 
 const contexts: Context[] = []
 const roots: string[] = []
 
-async function harness(): Promise<{ controller: SupraMasController; ctx: Context }> {
+async function harness(): Promise<{ controller: SupraMasController; ctx: Context; artifactRoot: string }> {
   const root = await mkdtemp(join(tmpdir(), 'dsh-api-supramas-'))
-  roots.push(root)
+  const artifactRoot = await mkdtemp(join(tmpdir(), 'dsh-api-supramas-artifacts-'))
+  roots.push(root, artifactRoot)
   const ctx = new Context()
   contexts.push(ctx)
   await ctx.plugin(Storage)
@@ -48,8 +50,9 @@ async function harness(): Promise<{ controller: SupraMasController; ctx: Context
     Config: storageDomainConfig,
   }, { backend: 'json' })
   await ctx.plugin(SupraMasRuntime)
+  await ctx.plugin(SupraMasArtifacts, { root: artifactRoot })
   await ctx.plugin(SupraMasController)
-  return { controller: ctx.supramasController, ctx }
+  return { controller: ctx.supramasController, ctx, artifactRoot }
 }
 
 afterEach(async () => {
@@ -80,14 +83,36 @@ describe('SupraMAS Remote contract', () => {
     expect(remoteMethods(controller)).toEqual([
       { method: 'list', invocation: { kind: 'direct' } },
       { method: 'get', invocation: { kind: 'direct' } },
+      { method: 'artifacts', invocation: { kind: 'direct' } },
       { method: 'createStage1', invocation: { kind: 'direct' } },
       { method: 'resume', invocation: { kind: 'direct' } },
       { method: 'cancel', invocation: { kind: 'direct' } },
     ])
   })
 
+  it('reports only browser-safe output names and readiness', async () => {
+    const { controller, artifactRoot } = await harness()
+    const created = await controller.createStage1(request)
+
+    await expect(controller.artifacts(created.run.id)).resolves.toEqual({
+      apiVersion: 1,
+      runId: created.run.id,
+      ready: false,
+      files: [
+        { name: 'strategy_tree.json', ready: false },
+        { name: 'node_review_log.jsonl', ready: false },
+        { name: 'review_report.md', ready: false },
+      ],
+    })
+    const serialized = JSON.stringify(await controller.artifacts(created.run.id))
+    expect(serialized).not.toContain(artifactRoot)
+    await expect(controller.artifacts('supramas:missing')).rejects.toMatchObject({
+      failure: { code: 'supramas-run-not-found' },
+    })
+  })
+
   it('creates, prepares, and starts one Stage 1 run with safe defaults', async () => {
-    const { controller } = await harness()
+    const { controller, artifactRoot } = await harness()
     const created = await controller.createStage1(request)
 
     expect(created).toMatchObject({
@@ -106,7 +131,7 @@ describe('SupraMAS Remote contract', () => {
         limits: {
           maxDepth: 2,
           maxRootAttempts: 3,
-          maxChildAttemptsPerLimitation: 2,
+          maxChildAttemptsPerLimitation: 3,
           maxBranchPerNode: null,
           targetChildNodes: null,
         },
@@ -122,6 +147,10 @@ describe('SupraMAS Remote contract', () => {
     })
     expect(created.run).not.toHaveProperty('inputTaskPath')
     expect(created.run).not.toHaveProperty('runDir')
+    const task = await readFile(join(artifactRoot, 'runs/ui-stage1-demo/input_task.yaml'), 'utf8')
+    expect(task).toContain('max_child_attempts_per_limitation: 3')
+    expect(task).toContain('- "Stage 2 idea generation"')
+    expect(task).toContain('- "abstract-only evidence"')
 
     await expect(controller.list()).resolves.toEqual({
       apiVersion: 1,

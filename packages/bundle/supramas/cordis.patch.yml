@@ -2,6 +2,10 @@
 - insert:
     - id: supramas-runtime
       name: '@deepseek-ai/dsh-supramas'
+    - id: supramas-artifacts
+      name: '@deepseek-ai/dsh-supramas-artifacts'
+      config:
+        root: !!js process.cwd()
     - id: api-supramas
       name: '@deepseek-ai/dsh-api-supramas'
     - id: tool-supramas

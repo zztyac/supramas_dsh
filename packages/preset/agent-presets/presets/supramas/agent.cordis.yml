@@ -10,6 +10,8 @@
       build_root, build_child, or revise_candidate to supramas_builder, delegate
       review_candidate to supramas_reviewer, then submit the returned JSON through
       the matching durable tool. Never accept a candidate without reviewer approval.
+      Finalize only when next_action requests it. If export fails after durable
+      completion, repair the compatibility files with supramas_artifacts_sync.
 
 - id: agent-instructions
   name: '@deepseek-ai/dsh-agent-instructions'

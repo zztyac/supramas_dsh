@@ -240,6 +240,31 @@ describe('Stage 1 builder/reviewer orchestration', () => {
     expect(nextStage1Action(completed.workflow)).toMatchObject({ kind: 'completed' })
   })
 
+  it('preserves the Stage 1 task policy needed to reproduce input_task.yaml', () => {
+    const workflow = createStage1Workflow({
+      jobId: 'task-policy',
+      researchTopic: 'BZO pinning in REBCO',
+      materialScope: ['REBCO coated conductors'],
+      targetProperty: ['in-field Jc'],
+      evidencePolicy: 'Use full-text local evidence only.',
+      include: ['BZO artificial pinning centers'],
+      exclude: ['abstract-only evidence', 'Stage 2 idea generation'],
+      maxDepth: 3,
+      maxRootAttempts: 2,
+      maxChildAttemptsPerLimitation: 3,
+      maxBranchPerNode: null,
+      targetChildNodes: null,
+    })
+
+    expect(workflow.config).toMatchObject({
+      evidencePolicy: 'Use full-text local evidence only.',
+      include: ['BZO artificial pinning centers'],
+      exclude: ['abstract-only evidence', 'Stage 2 idea generation'],
+    })
+    expect(validateStage1Workflow(workflow, new EvidenceCatalog('task-policy')).config)
+      .toEqual(workflow.config)
+  })
+
   it('uses real empty builder attempts before exhausting a frontier budget', () => {
     const catalog = evidence()
     const rootBuilt = submitStage1Builder(started(), { paper_node: rootDraft(), edge: null, notes: [] }, catalog)

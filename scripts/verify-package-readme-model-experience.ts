@@ -76,6 +76,7 @@ const SENTENCE_MODEL_EXPERIENCE: Readonly<Record<string, SentenceContract>> = {
   'packages/client/connection': { kind: 'none', reason: 'Browser-side UI plugin layer; registers nothing model-facing.' },
   'packages/api/remotes': { kind: 'none', reason: 'The Remote BFF selects business methods and forwarded events; selected services own any model-visible effect.' },
   'packages/supramas/api-supramas': { kind: 'none', reason: 'The Host Remote boundary projects durable task state without registering model-facing input.' },
+  'packages/supramas/supramas-artifacts': { kind: 'none', reason: 'The Host-side filesystem projection registers no prompt, tool schema, or model-visible result.' },
   'packages/experimental/agent-team-web-profile': { kind: 'indirect', reason: 'The private Web layer delegates model composition to the Host-side Agent Teams profile.' },
   'packages/experimental/client-ui-agent-team': { kind: 'none', reason: 'The browser projection and task controls register no model-facing input.' },
   'packages/client/ui-layout': { kind: 'none', reason: 'Browser-side UI plugin layer; registers nothing model-facing.' },

@@ -2539,6 +2539,22 @@ export interface Config {
 
 Source: [`packages/e2b/subprocess-e2b/src/index.ts:25`](../packages/e2b/subprocess-e2b/src/index.ts)
 
+<a id="deepseek-aidsh-supramas-artifacts"></a>
+
+## `@deepseek-ai/dsh-supramas-artifacts`
+
+Requires: `supramas`
+
+```ts config-catalog
+/** Plugin configuration for one workspace-confined compatibility export root. */
+export interface Config {
+  /** Absolute directory under which canonical `runs/<job_id>` paths are materialized. */
+  root: string
+}
+```
+
+Source: [`packages/supramas/supramas-artifacts/src/index.ts:20`](../packages/supramas/supramas-artifacts/src/index.ts)
+
 <a id="deepseek-aidsh-system-prompt"></a>
 
 ## `@deepseek-ai/dsh-system-prompt`
@@ -3406,7 +3422,7 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 - `@deepseek-ai/dsh-acp-app` — requires `cmdlineArgs` ([`packages/bundle/acp-app/src/index.ts`](../packages/bundle/acp-app/src/index.ts))
 - `@deepseek-ai/dsh-agent` ([`packages/core/agent/src/index.ts`](../packages/core/agent/src/index.ts))
 - `@deepseek-ai/dsh-api-remotes` — requires `typertGateway` ([`packages/api/remotes/src/index.ts`](../packages/api/remotes/src/index.ts))
-- `@deepseek-ai/dsh-api-supramas` — requires `supramas` ([`packages/supramas/api-supramas/src/index.ts`](../packages/supramas/api-supramas/src/index.ts))
+- `@deepseek-ai/dsh-api-supramas` — requires `supramas` · `supramasArtifacts` ([`packages/supramas/api-supramas/src/index.ts`](../packages/supramas/api-supramas/src/index.ts))
 - `@deepseek-ai/dsh-api-workspace-controller` — requires `typert` · `workspaceRegistry` ([`packages/api/workspace-controller/src/index.ts`](../packages/api/workspace-controller/src/index.ts))
 - `@deepseek-ai/dsh-authorization` — requires `credentials` ([`packages/credentials/authorization/src/index.ts`](../packages/credentials/authorization/src/index.ts))
 - `@deepseek-ai/dsh-client-locale` ([`packages/client/locale/src/index.ts`](../packages/client/locale/src/index.ts))
@@ -3478,7 +3494,7 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 - `@deepseek-ai/dsh-tool-call-timeout-policy` — requires `tools` ([`packages/guard/timeout-policy/src/index.ts`](../packages/guard/timeout-policy/src/index.ts))
 - `@deepseek-ai/dsh-tool-cordis` — requires `tools` · `systemPrompt` · `dynamicCordisRunner` · `cordisInspect` ([`packages/extensions/tool-cordis/src/index.ts`](../packages/extensions/tool-cordis/src/index.ts))
 - `@deepseek-ai/dsh-tool-subagent-control` — requires `tools` · `subagents` ([`packages/subagent/tool-subagent-control/src/index.ts`](../packages/subagent/tool-subagent-control/src/index.ts))
-- `@deepseek-ai/dsh-tool-supramas` — requires `tools` · `supramas` ([`packages/supramas/tool-supramas/src/index.ts`](../packages/supramas/tool-supramas/src/index.ts))
+- `@deepseek-ai/dsh-tool-supramas` — requires `tools` · `supramas` · `supramasArtifacts` ([`packages/supramas/tool-supramas/src/index.ts`](../packages/supramas/tool-supramas/src/index.ts))
 - `@deepseek-ai/dsh-user-questions` ([`packages/interaction/user-questions/src/index.ts`](../packages/interaction/user-questions/src/index.ts))
 - `@deepseek-ai/dsh-webhook` — requires `agents` · `agentDefaultModel` · `agentPresets` · `permissionPresets` · `sessionTitle` · `workspaceRegistry` ([`packages/webhook/webhook/src/index.ts`](../packages/webhook/webhook/src/index.ts))
 - `@deepseek-ai/dsh-workspace` — requires `storageDomain` · `sessionPersistence` ([`packages/workspace/workspace/src/index.ts`](../packages/workspace/workspace/src/index.ts))

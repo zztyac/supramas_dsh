@@ -318,14 +318,20 @@ const TOOL_PACKAGES: ToolPackage[] = [
     pkg: '@deepseek-ai/dsh-tool-supramas',
     dir: 'tool-supramas',
     source: 'packages/supramas/tool-supramas/src/index.ts',
-    requires: ['ctx.tools', 'ctx.supramas'],
-    writes: ['tool/call', 'durable SupraMAS run, evidence, or Stage 1 workflow state', 'tool/result'],
+    requires: ['ctx.tools', 'ctx.supramas', 'ctx.supramasArtifacts'],
+    writes: [
+      'tool/call',
+      'durable SupraMAS run, evidence, or Stage 1 workflow state',
+      'workspace-confined Stage 1 compatibility files',
+      'tool/result',
+    ],
     async mount(ctx) {
       ctx.provide('supramas', {} as unknown as SupraMasRuntime)
+      ctx.provide('supramasArtifacts', {})
       await ctx.plugin(ToolSupraMas)
     },
     note:
-      'Thirteen bounded material-science tools expose durable run control, provenance-bound evidence, and the Stage 1 builder/reviewer state machine without bypassing reviewer acceptance.',
+      'Fourteen bounded material-science tools expose durable run control, provenance-bound evidence, compatibility-file repair, and the Stage 1 builder/reviewer state machine without bypassing reviewer acceptance.',
   },
   {
     pkg: '@deepseek-ai/dsh-tool-fs',

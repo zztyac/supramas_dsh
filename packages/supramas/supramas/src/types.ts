@@ -10,6 +10,9 @@ import type {
 /** Stable identity of one SupraMAS run. */
 export type SupraMasRunId = Branded<'SupraMasRunId'>
 
+/** Public type-only alias that remains unambiguous beside the runtime `SupraMasRunId()` parser. */
+export type SupraMasRunIdBrand = SupraMasRunId
+
 /** Compare-and-set identity of one exact run revision. */
 export interface RunRef {
   readonly id: SupraMasRunId

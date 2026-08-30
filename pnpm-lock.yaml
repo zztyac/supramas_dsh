@@ -430,6 +430,15 @@ importers:
       '@deepseek-ai/dsh-settings-file':
         specifier: workspace:^
         version: link:../../packages/settings/settings-file
+      '@deepseek-ai/dsh-storage':
+        specifier: workspace:^
+        version: link:../../packages/storage/storage
+      '@deepseek-ai/dsh-storage-domain':
+        specifier: workspace:^
+        version: link:../../packages/storage/storage-domain
+      '@deepseek-ai/dsh-storage-json':
+        specifier: workspace:^
+        version: link:../../packages/storage/storage-json
       '@deepseek-ai/dsh-subagent':
         specifier: workspace:^
         version: link:../../packages/subagent/subagent
@@ -442,12 +451,21 @@ importers:
       '@deepseek-ai/dsh-subprocess-local':
         specifier: workspace:^
         version: link:../../packages/subprocess/subprocess-local
+      '@deepseek-ai/dsh-supramas':
+        specifier: workspace:^
+        version: link:../../packages/supramas/supramas
+      '@deepseek-ai/dsh-supramas-artifacts':
+        specifier: workspace:^
+        version: link:../../packages/supramas/supramas-artifacts
       '@deepseek-ai/dsh-system-prompt':
         specifier: workspace:^
         version: link:../../packages/core/system-prompt
       '@deepseek-ai/dsh-tool-subagent-report':
         specifier: workspace:^
         version: link:../../packages/subagent/tool-subagent-report
+      '@deepseek-ai/dsh-tool-supramas':
+        specifier: workspace:^
+        version: link:../../packages/supramas/tool-supramas
       '@deepseek-ai/dsh-tools':
         specifier: workspace:^
         version: link:../../packages/core/tools
@@ -1428,6 +1446,9 @@ importers:
       '@deepseek-ai/dsh-supramas':
         specifier: workspace:^
         version: link:../../supramas/supramas
+      '@deepseek-ai/dsh-supramas-artifacts':
+        specifier: workspace:^
+        version: link:../../supramas/supramas-artifacts
       '@deepseek-ai/dsh-tool-supramas':
         specifier: workspace:^
         version: link:../../supramas/tool-supramas
@@ -8996,6 +9017,9 @@ importers:
       '@deepseek-ai/dsh-supramas':
         specifier: workspace:^
         version: link:../supramas
+      '@deepseek-ai/dsh-supramas-artifacts':
+        specifier: workspace:^
+        version: link:../supramas-artifacts
       '@deepseek-ai/dsh-typert-protocol':
         specifier: workspace:^
         version: link:../../typert/protocol
@@ -9073,6 +9097,37 @@ importers:
         specifier: workspace:^
         version: link:../../storage/storage-json
 
+  packages/supramas/supramas-artifacts:
+    dependencies:
+      '@deepseek-ai/schemastery':
+        specifier: link:../../../vendor/schemastery
+        version: link:../../../vendor/schemastery
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:^
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-atomic-write':
+        specifier: workspace:^
+        version: link:../../util/atomic-write
+      '@deepseek-ai/dsh-invariants':
+        specifier: workspace:^
+        version: link:../../runtime-diagnostics/invariants
+      '@deepseek-ai/dsh-storage':
+        specifier: workspace:^
+        version: link:../../storage/storage
+      '@deepseek-ai/dsh-storage-domain':
+        specifier: workspace:^
+        version: link:../../storage/storage-domain
+      '@deepseek-ai/dsh-storage-json':
+        specifier: workspace:^
+        version: link:../../storage/storage-json
+      '@deepseek-ai/dsh-supramas':
+        specifier: workspace:^
+        version: link:../supramas
+      '@deepseek-ai/dsh-supramas-domain':
+        specifier: workspace:^
+        version: link:../supramas-domain
+
   packages/supramas/supramas-domain:
     devDependencies:
       '@deepseek-ai/cordis':
@@ -9111,6 +9166,9 @@ importers:
       '@deepseek-ai/dsh-supramas':
         specifier: workspace:^
         version: link:../supramas
+      '@deepseek-ai/dsh-supramas-artifacts':
+        specifier: workspace:^
+        version: link:../supramas-artifacts
       '@deepseek-ai/dsh-system-prompt':
         specifier: workspace:^
         version: link:../../core/system-prompt

@@ -29,6 +29,7 @@ The public V1 view contains task identity, lifecycle state, Stage 1 limits, aggr
 | --- | --- |
 | `list()` | Return every durable material task in creation order. |
 | `get(runId)` | Return one current task view. |
+| `artifacts(runId)` | Return the three final output names and readiness without host paths. |
 | `createStage1(request)` | Normalize input, create the run, approve the task, and enter Stage 1. |
 | `resume(runId, revision)` | Resume a recoverable task under revision control. |
 | `cancel(runId, revision)` | Cancel a non-terminal task under revision control. |

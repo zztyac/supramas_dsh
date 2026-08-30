@@ -80,8 +80,10 @@ flowchart LR
   pkg_workspace["workspace"]
   pkg_supramas["supramas"]
   svc_supramas["ctx.supramas<br/>Durable material-science task runtime"]
+  pkg_supramas_artifacts["supramas-artifacts"]
   pkg_api_supramas["api-supramas"]
   pkg_tool_supramas["tool-supramas"]
+  svc_supramasArtifacts["ctx.supramasArtifacts<br/>Stage 1 compatibility artifact projection"]
   svc_supramasController["ctx.supramasController<br/>Host SupraMAS Remote controller"]
   svc_messageFeedback["ctx.messageFeedback<br/>Lifecycle-bound message feedback"]
   svc_workspaceRegistry["ctx.workspaceRegistry<br/>Workspace entity registry"]
@@ -322,6 +324,7 @@ flowchart LR
   pkg_subprocess_e2b --> svc_subprocess
   pkg_subprocess_local --> svc_subprocess
   pkg_supramas --> svc_supramas
+  pkg_supramas_artifacts --> svc_supramasArtifacts
   pkg_system_prompt --> svc_systemPrompt
   pkg_terminal --> svc_terminals
   pkg_terminal_bash --> svc_terminals
@@ -436,7 +439,10 @@ flowchart LR
   svc_subprocess --> pkg_subagent_codex
   svc_subprocess --> pkg_terminal_bash
   svc_supramas --> pkg_api_supramas
+  svc_supramas --> pkg_supramas_artifacts
   svc_supramas --> pkg_tool_supramas
+  svc_supramasArtifacts --> pkg_api_supramas
+  svc_supramasArtifacts --> pkg_tool_supramas
   svc_systemPrompt --> pkg_agent_loop
   svc_systemPrompt --> pkg_tool_fs
   svc_systemPrompt --> pkg_tool_terminal
@@ -496,7 +502,8 @@ flowchart LR
 | `ctx.sessionTelemetry` | `seam` | [`session-telemetry`](../packages/session/session-telemetry) | [`session-telemetry-otel`](../packages/session/session-telemetry-otel) | - | - | The seam captures, redacts, and hands session records to one backend; nothing else consumes the service — its output leaves the process. |
 | `ctx.storage` | `seam` | [`storage`](../packages/storage/storage) | [`storage-json`](../packages/storage/storage-json), [`storage-sqlite`](../packages/storage/storage-sqlite) | [`storage-domain`](../packages/storage/storage-domain) | - | Backends register side by side under names; data forms (domain first) mount on the hub and translate typed operations into opaque KV-unit primitives. |
 | `ctx.storageDomain` | `core` | [`storage-domain`](../packages/storage/storage-domain) | - | [`workspace`](../packages/workspace/workspace), [`message-feedback`](../packages/feedback/message-feedback) | - | Waits for every configured backend, then publishes the domain form as one lifecycle-bound service for typed durable state. |
-| `ctx.supramas` | `core` | [`supramas`](../packages/supramas/supramas) | - | [`api-supramas`](../packages/supramas/api-supramas), [`tool-supramas`](../packages/supramas/tool-supramas) | - | Owns Stage 1 run state, evidence catalogs, role authority, compare-and-set lifecycle transitions, and restart recovery over the domain storage facility. |
+| `ctx.supramas` | `core` | [`supramas`](../packages/supramas/supramas) | - | [`supramas-artifacts`](../packages/supramas/supramas-artifacts), [`api-supramas`](../packages/supramas/api-supramas), [`tool-supramas`](../packages/supramas/tool-supramas) | - | Owns Stage 1 run state, evidence catalogs, role authority, compare-and-set lifecycle transitions, and restart recovery over the domain storage facility. |
+| `ctx.supramasArtifacts` | `core` | [`supramas-artifacts`](../packages/supramas/supramas-artifacts) | - | [`api-supramas`](../packages/supramas/api-supramas), [`tool-supramas`](../packages/supramas/tool-supramas) | - | Atomically projects durable SupraMAS state into workspace-confined task, evidence, restart, and final-output files without becoming a second workflow authority. |
 | `ctx.supramasController` | `core` | [`api-supramas`](../packages/supramas/api-supramas) | - | - | - | Projects safe versioned material-task views and lifecycle commands onto the generated Host Remote namespace for browser clients. |
 | `ctx.messageFeedback` | `core` | [`message-feedback`](../packages/feedback/message-feedback) | - | - | - | Owns local per-assistant-message feedback, lifecycle and target validation, per-item compare-and-set, and the Host unary Remote contract without entering Session history or telemetry. |
 | `ctx.workspaceRegistry` | `core` | [`workspace`](../packages/workspace/workspace) | - | [`api-workspace-controller`](../packages/api/workspace-controller), [`api-session-controller`](../packages/api/session-controller) | - | Owns WorkspaceId-branded records over the domain facility; stable sessionIds accounts drive Host RPC and GUI projections. |
