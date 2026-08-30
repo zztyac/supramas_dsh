@@ -50,6 +50,8 @@ import * as ToolCordis from '@deepseek-ai/dsh-tool-cordis'
 import * as ToolFs from '@deepseek-ai/dsh-tool-fs'
 import * as ToolFsSearch from '@deepseek-ai/dsh-tool-fs-search'
 import * as ToolStrReplaceEditor from '@deepseek-ai/dsh-tool-str-replace-editor'
+import type { SupraMasRuntime } from '@deepseek-ai/dsh-supramas'
+import * as ToolSupraMas from '@deepseek-ai/dsh-tool-supramas'
 import TerminalSessionService from '@deepseek-ai/dsh-terminal'
 import * as ToolPty from '@deepseek-ai/dsh-tool-terminal'
 import * as ToolGoal from '@deepseek-ai/dsh-tool-goal'
@@ -311,6 +313,19 @@ const TOOL_PACKAGES: ToolPackage[] = [
     },
     note:
       'Standalone view/create/unique literal replace/line insert tool over the filesystem seam; it composes with any shell or terminal API.',
+  },
+  {
+    pkg: '@deepseek-ai/dsh-tool-supramas',
+    dir: 'tool-supramas',
+    source: 'packages/supramas/tool-supramas/src/index.ts',
+    requires: ['ctx.tools', 'ctx.supramas'],
+    writes: ['tool/call', 'durable SupraMAS run, evidence, or Stage 1 workflow state', 'tool/result'],
+    async mount(ctx) {
+      ctx.provide('supramas', {} as unknown as SupraMasRuntime)
+      await ctx.plugin(ToolSupraMas)
+    },
+    note:
+      'Thirteen bounded material-science tools expose durable run control, provenance-bound evidence, and the Stage 1 builder/reviewer state machine without bypassing reviewer acceptance.',
   },
   {
     pkg: '@deepseek-ai/dsh-tool-fs',

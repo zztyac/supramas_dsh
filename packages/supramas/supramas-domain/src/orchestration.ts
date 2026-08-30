@@ -402,7 +402,11 @@ function applyCaps(workflow: Stage1Workflow): void {
   setReadyWhenClosed(workflow)
 }
 
-/** Start one empty, deterministic Stage 1 coordinator state. */
+/**
+ * Start one empty, deterministic Stage 1 coordinator state.
+ * @param config - Immutable research scope and attempt limits.
+ * @returns the normalized active workflow.
+ */
 export function createStage1Workflow(config: Stage1WorkflowConfig): Stage1Workflow {
   if (!JOB_ID.test(config.jobId)) fail('workflow.jobId is not a valid stable id')
   const normalized: Stage1WorkflowConfig = {
@@ -438,7 +442,11 @@ export function createStage1Workflow(config: Stage1WorkflowConfig): Stage1Workfl
   }
 }
 
-/** Compute the only legal next coordinator operation from durable state. */
+/**
+ * Compute the only legal next coordinator operation from durable state.
+ * @param workflow - Current durable workflow.
+ * @returns the next builder, reviewer, or terminal action.
+ */
 export function nextStage1Action(workflow: Stage1Workflow): Stage1NextAction {
   if (workflow.status === 'completed') return { kind: 'completed', tree: clone(treeOf(workflow)) }
   if (workflow.status === 'failed') return { kind: 'failed', reason: workflow.failure ?? 'workflow_failed' }
@@ -485,7 +493,13 @@ export function nextStage1Action(workflow: Stage1Workflow): Stage1NextAction {
   return { kind: 'finalize' }
 }
 
-/** Record one builder result while preserving the reviewer acceptance gate. */
+/**
+ * Record one builder result while preserving the reviewer acceptance gate.
+ * @param workflow - Current durable workflow.
+ * @param submission - Builder candidate, edge proposal, or no-result record.
+ * @param catalog - Run-local evidence available for literal validation.
+ * @returns a detached workflow advanced to its next legal state.
+ */
 export function submitStage1Builder(
   workflow: Stage1Workflow,
   submission: Stage1BuilderSubmission,
@@ -585,7 +599,13 @@ export function submitStage1Builder(
   return updated
 }
 
-/** Record one reviewer decision and advance only through its declared outcome. */
+/**
+ * Record one reviewer decision and advance only through its declared outcome.
+ * @param workflow - Current durable workflow with a pending candidate.
+ * @param submission - Normalized reviewer decision and required actions.
+ * @param catalog - Run-local evidence available for acceptance validation.
+ * @returns a detached workflow advanced to its next legal state.
+ */
 export function submitStage1Review(
   workflow: Stage1Workflow,
   submission: Stage1ReviewSubmission,
@@ -647,7 +667,12 @@ export function submitStage1Review(
   return updated
 }
 
-/** Finalize only after every reachable frontier has a terminal status. */
+/**
+ * Finalize only after every reachable frontier has a terminal status.
+ * @param workflow - Workflow whose next legal action is finalization.
+ * @param catalog - Run-local evidence used for final tree validation.
+ * @returns the completed workflow and strictly validated strategy tree.
+ */
 export function finalizeStage1Workflow(
   workflow: Stage1Workflow,
   catalog: EvidenceCatalog,

@@ -2,5 +2,9 @@
 - insert:
     - id: supramas-runtime
       name: '@deepseek-ai/dsh-supramas'
+    - id: api-supramas
+      name: '@deepseek-ai/dsh-api-supramas'
     - id: tool-supramas
       name: '@deepseek-ai/dsh-tool-supramas'
+    - id: client-ui-supramas
+      name: '@deepseek-ai/dsh-client-ui-supramas'

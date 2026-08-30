@@ -6,7 +6,7 @@ import * as yaml from 'js-yaml'
 import { entryListSchema } from '@deepseek-ai/cordis-plugin-include'
 
 describe('dsh-supramas bundle', () => {
-  it('declares a parseable Profile patch with the runtime before its tool consumer', () => {
+  it('declares a parseable Profile patch in runtime, API, tool, and UI order', () => {
     const root = fileURLToPath(new URL('..', import.meta.url))
     const manifest = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')) as {
       dependencies?: Record<string, string>
@@ -20,9 +20,13 @@ describe('dsh-supramas bundle', () => {
     const rows = parsed.flatMap(patch => patch.insert ?? [])
     expect(rows).toEqual([
       { id: 'supramas-runtime', name: '@deepseek-ai/dsh-supramas' },
+      { id: 'api-supramas', name: '@deepseek-ai/dsh-api-supramas' },
       { id: 'tool-supramas', name: '@deepseek-ai/dsh-tool-supramas' },
+      { id: 'client-ui-supramas', name: '@deepseek-ai/dsh-client-ui-supramas' },
     ])
     expect(manifest.dependencies).toMatchObject({
+      '@deepseek-ai/dsh-api-supramas': 'workspace:^',
+      '@deepseek-ai/dsh-client-ui-supramas': 'workspace:^',
       '@deepseek-ai/dsh-supramas': 'workspace:^',
       '@deepseek-ai/dsh-tool-supramas': 'workspace:^',
     })

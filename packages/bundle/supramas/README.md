@@ -1,5 +1,5 @@
 ---
-description: "A DSH profile bundle that mounts the durable SupraMAS runtime before its model-facing tool consumer."
+description: "A DSH profile extension that mounts the durable SupraMAS runtime, API, model tools, and browser dashboard."
 kind: "package-bundle"
 ---
 
@@ -9,15 +9,31 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-This static profile patch adds the durable SupraMAS capability and eight-tool consumer to a DSH profile in dependency order. It changes no agent-loop behavior and owns no runtime state itself.
+This static profile patch adds the durable SupraMAS capability, versioned browser API, thirteen-tool model consumer, and non-technical task dashboard to a DSH profile in dependency order. It changes no agent-loop behavior and owns no runtime state itself.
+
+## Table of Contents
+
+- [Use this package](#use-this-package)
+- [Understand the implementation](#understand-the-implementation)
+- [Model Experience](#model-experience)
+- [Known Limitations and Deferred Work](#known-limitations-and-deferred-work)
+- [Dev Note](#dev-note)
 
 ## Use this package
 
-Add the bundle after the base profile bundle. The base profile supplies the DSH storage, JSON backend, and storage-domain services used by SupraMAS. Select the shipped `supramas` agent preset for the material-science persona, skills, user questions, and in-process delegation controls.
+Add the bundle after the base and Web profile bundles. The base profile supplies the DSH storage services used by SupraMAS. Select the shipped `supramas` agent preset for the material-science persona, skills, user questions, and in-process delegation controls.
+
+From a source checkout, build once and launch the ordinary Web profile with this bundle as an overlay:
+
+```powershell
+pnpm run build
+pnpm run build:web
+pnpm dsh web --patch packages/bundle/supramas/cordis.patch.yml
+```
 
 ## Understand the implementation
 
-`cordis.patch.yml` inserts `@deepseek-ai/dsh-supramas` before `@deepseek-ai/dsh-tool-supramas`. The runtime opens the versioned `supramas` storage domain; the static bundle itself still owns no service.
+`cordis.patch.yml` inserts the runtime, Typert API, model tool, and browser UI in that order. The runtime opens the versioned `supramas` storage domain; the static bundle itself still owns no service.
 
 ## Model Experience
 
@@ -25,7 +41,7 @@ Add the bundle after the base profile bundle. The base profile supplies the DSH 
 
 #### What the model sees
 
-Nothing from the carrier itself. Inserted packages contribute four `supramas_run_*` tools and four evidence tools; role allowlists determine which schemas are visible.
+Nothing from the carrier itself. Inserted packages contribute thirteen `supramas_*` run, evidence, and Stage 1 workflow tools; role allowlists determine which schemas are visible.
 
 #### Token effect
 
@@ -37,7 +53,7 @@ Changing inserted rows or role-visible tools changes the composed model surface 
 
 ## Known Limitations and Deferred Work
 
-- The bundle does not yet install literature providers, API routes, PDF ingestion, or UI components.
+- The bundle does not yet install dedicated scholarly-index providers, PDF ingestion, live task events, or final-artifact visualization.
 
 ### Dev Note
 

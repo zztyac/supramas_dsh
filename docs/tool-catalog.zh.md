@@ -28,6 +28,7 @@
 | `@deepseek-ai/dsh-tool-bash-persistent` | `bash` | `ctx.tools`、`ctx.terminals`、`an owning Agent at execution time` | `tool/call`、`PTY shell state`、`tool/result` | - | 一个按所有者隔离的持久 bash 工具；部署组合提供 PTY 后端，并可覆盖面向模型的环境描述。 |
 | `@deepseek-ai/dsh-tool-pwsh-persistent` | `pwsh` | `ctx.tools`、`ctx.terminals`、`an owning Agent at execution time` | `tool/call`、`PTY shell state`、`tool/result` | - | 一个按所有者隔离的持久 pwsh 工具，持久 bash 工具的 Windows 对应物；部署组合提供 pwsh 方言的 PTY 后端，并可覆盖面向模型的环境描述。 |
 | `@deepseek-ai/dsh-tool-str-replace-editor` | `str_replace_editor` | `ctx.tools`、`ctx.fs` | `tool/call`、`fs/observed after view presence/absence, edit absence, or successful mutation`、`tool/result` | - | 基于文件系统 seam 的独立查看／创建／唯一字面量替换／按行插入工具；可与任何 shell 或终端接口组合。 |
+| `@deepseek-ai/dsh-tool-supramas` | `supramas_artifact_read`、`supramas_chunk_extract`、`supramas_evidence_verify`、`supramas_paper_store`、`supramas_run_create`、`supramas_run_get`、`supramas_run_list`、`supramas_run_transition`、`supramas_stage1_builder_submit`、`supramas_stage1_finalize`、`supramas_stage1_get`、`supramas_stage1_reviewer_submit`、`supramas_stage1_start` | `ctx.tools`、`ctx.supramas` | `tool/call`、`durable SupraMAS run, evidence, or Stage 1 workflow state`、`tool/result` | - | 十三个边界明确的材料科学工具提供持久运行控制、带来源约束的证据和 Stage 1 builder/reviewer 状态机，并且不会绕过 reviewer 接收门。 |
 | `@deepseek-ai/dsh-tool-fs` | `edit`、`read`、`read_image`、`write` | `ctx.tools`、`ctx.fs`、`ctx.systemPrompt`、`ctx.attachments (image-tool registration)`、`ctx.llm + an image-capable route (image-tool execution)` | `tool/call`、`fs/write-intent or fs/edit-intent for mutations`、`fs/observed after read presence/absence or successful file operation`、`durable attachment (read_image)`、`tool/result` | - | 先读后写／编辑策略由 `@deepseek-ai/dsh-fs-observation-policy` 添加；它是一个 `fs/*` 事件门禁插件，不会改变 schema。加载这些工具的部署按预期也应加载该插件。没有 `ctx.attachments` 时图片工具不会注册；其 schema 与路由无关，执行时除非确切路由的模型声明图片输入，否则拒绝。 |
 | `@deepseek-ai/dsh-tool-fs-search` | `glob`、`grep` | `ctx.tools`、`ctx.subprocess`、`ctx.systemPrompt` | `tool/call`、`tool/result` | - | glob 和 grep 是无条件可用的发现工具，通过 ctx.subprocess spawn 随包提供的 ripgrep 二进制文件（`@vscode/ripgrep`），并作为普通前台调用运行，绝不作为后台任务；无需在宿主机安装 `rg`，也不经过 shell 层。本目录使用 `sampleOverCapGlobResults: true`；部署必须显式选择该行为。结果超过上限时，会通过可选的 ctx.spillStore 后端保存完整的格式化列表；在共置部署中，如果后端公开本地路径，返回的定位信息可供后续读取／搜索。 |
 | `@deepseek-ai/dsh-tool-terminal` | `terminal_close`、`terminal_list`、`terminal_open`、`terminal_read`、`terminal_send`、`terminal_signal` | `ctx.tools`、`ctx.terminals`、`ctx.systemPrompt`、`ctx.jobs at call time for run_in_background` | `tool/call`、`tool/result` | - | 这 6 个终端工具需要选择启用，用于补充一次性 bash／文件系统工具。`terminal_send(run_in_background: true)` 会注册到 `ctx.jobs`；schema 不包含 TUI、具名按键序列、BEL、调整尺寸、自动启动和跨 agent 共享。 |
@@ -666,6 +667,556 @@ pwsh 工具是 Windows 组合中 bash 执行器 seam 的 PowerShell 方言消费
 来源：[`packages/fs/tool-str-replace-editor/src/index.ts`](../packages/fs/tool-str-replace-editor/src/index.ts)
 
 基于文件系统 seam 的独立查看／创建／唯一字面量替换／按行插入工具；可与任何 shell 或终端接口组合。
+
+<a id="deepseek-aidsh-tool-supramas"></a>
+
+## `@deepseek-ai/dsh-tool-supramas`
+
+### `supramas_artifact_read`
+
+读取一项隔离的运行内论文产物及其全部持久证据文本块。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "run_id": {
+      "type": "string",
+      "description": "Owning deterministic SupraMAS run id."
+    },
+    "paper_id": {
+      "type": "string",
+      "description": "Registered paper identity."
+    }
+  },
+  "required": [
+    "run_id",
+    "paper_id"
+  ]
+}
+```
+
+来源：[`packages/supramas/tool-supramas/src/index.ts`](../packages/supramas/tool-supramas/src/index.ts)
+
+### `supramas_chunk_extract`
+
+在已登记的本地论文下持久化一个带页码的证据文本块。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "run_id": {
+      "type": "string",
+      "description": "Owning deterministic SupraMAS run id."
+    },
+    "paper_id": {
+      "type": "string",
+      "description": "Owning registered paper identity."
+    },
+    "chunk_id": {
+      "type": "string",
+      "description": "Globally unique run-local chunk identity."
+    },
+    "page": {
+      "type": "integer",
+      "description": "One-based source page when available."
+    },
+    "text": {
+      "type": "string",
+      "description": "Full persisted chunk text, not a paraphrase."
+    }
+  },
+  "required": [
+    "run_id",
+    "paper_id",
+    "chunk_id",
+    "text"
+  ]
+}
+```
+
+来源：[`packages/supramas/tool-supramas/src/index.ts`](../packages/supramas/tool-supramas/src/index.ts)
+
+### `supramas_evidence_verify`
+
+验证一段字面证据引文及其页码能否解析到已存储的本地论文文本块。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "run_id": {
+      "type": "string",
+      "description": "Owning deterministic SupraMAS run id."
+    },
+    "paper_id": {
+      "type": "string",
+      "description": "Expected owning paper identity."
+    },
+    "chunk_id": {
+      "type": "string",
+      "description": "Referenced local chunk identity."
+    },
+    "page": {
+      "type": "integer",
+      "description": "One-based source page when claimed by the record."
+    },
+    "evidence_text": {
+      "type": "string",
+      "description": "Literal quote that must occur in the chunk."
+    }
+  },
+  "required": [
+    "run_id",
+    "paper_id",
+    "chunk_id",
+    "evidence_text"
+  ]
+}
+```
+
+来源：[`packages/supramas/tool-supramas/src/index.ts`](../packages/supramas/tool-supramas/src/index.ts)
+
+### `supramas_paper_store`
+
+在规范的运行内论文路径登记一项已核验的论文产物。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "run_id": {
+      "type": "string",
+      "description": "Owning deterministic SupraMAS run id."
+    },
+    "paper_id": {
+      "type": "string",
+      "description": "Stable paper identity used by one tree node."
+    },
+    "paper_title": {
+      "type": "string",
+      "description": "Verified publication title."
+    },
+    "local_path": {
+      "type": "string",
+      "description": "Canonical runs/<job_id>/papers/<paper_id>.json path."
+    },
+    "source_type": {
+      "type": "string",
+      "description": "Scientific source classification.",
+      "enum": [
+        "experimental",
+        "review",
+        "theory",
+        "dataset",
+        "unknown"
+      ]
+    }
+  },
+  "required": [
+    "run_id",
+    "paper_id",
+    "paper_title",
+    "local_path",
+    "source_type"
+  ]
+}
+```
+
+来源：[`packages/supramas/tool-supramas/src/index.ts`](../packages/supramas/tool-supramas/src/index.ts)
+
+### `supramas_run_create`
+
+创建一项确定且带 revision 的 SupraMAS 材料科学运行。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "job_id": {
+      "type": "string",
+      "description": "Stable job id used below runs/<job_id>."
+    },
+    "input_task_path": {
+      "type": "string",
+      "description": "Canonical runs/<job_id>/input_task.yaml path."
+    },
+    "run_dir": {
+      "type": "string",
+      "description": "Canonical runs/<job_id> directory."
+    }
+  },
+  "required": [
+    "job_id",
+    "input_task_path",
+    "run_dir"
+  ]
+}
+```
+
+来源：[`packages/supramas/tool-supramas/src/index.ts`](../packages/supramas/tool-supramas/src/index.ts)
+
+### `supramas_run_get`
+
+读取一项 SupraMAS 运行当前的隔离快照。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "run_id": {
+      "type": "string",
+      "description": "Deterministic run id such as supramas:demo."
+    }
+  },
+  "required": [
+    "run_id"
+  ]
+}
+```
+
+来源：[`packages/supramas/tool-supramas/src/index.ts`](../packages/supramas/tool-supramas/src/index.ts)
+
+### `supramas_run_list`
+
+按稳定创建顺序列出全部持久 SupraMAS 运行，以便发现和恢复。
+
+```json
+{
+  "type": "object",
+  "properties": {}
+}
+```
+
+来源：[`packages/supramas/tool-supramas/src/index.ts`](../packages/supramas/tool-supramas/src/index.ts)
+
+### `supramas_run_transition`
+
+在比较并交换 revision 保护下推进或恢复一项持久 SupraMAS 运行。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "run_id": {
+      "type": "string",
+      "description": "Deterministic run id such as supramas:demo."
+    },
+    "revision": {
+      "type": "integer",
+      "description": "Exact current revision returned by list or get."
+    },
+    "phase": {
+      "type": "string",
+      "description": "Requested next durable lifecycle phase.",
+      "enum": [
+        "created",
+        "clarifying",
+        "task_ready",
+        "running",
+        "validating",
+        "completed",
+        "recoverable_failed",
+        "failed",
+        "cancelled"
+      ]
+    },
+    "failure_code": {
+      "type": "string",
+      "description": "Stable failure code; required for a failed phase."
+    },
+    "failure_message": {
+      "type": "string",
+      "description": "Actionable failure detail; required for a failed phase."
+    },
+    "failure_retryable": {
+      "type": "boolean",
+      "description": "Whether an operator may safely resume this failure."
+    }
+  },
+  "required": [
+    "run_id",
+    "revision",
+    "phase"
+  ]
+}
+```
+
+来源：[`packages/supramas/tool-supramas/src/index.ts`](../packages/supramas/tool-supramas/src/index.ts)
+
+### `supramas_stage1_builder_submit`
+
+提交一次 builder 尝试；候选项在 reviewer 批准前保持未接收状态。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "run_id": {
+      "type": "string",
+      "description": "Owning deterministic SupraMAS run id."
+    },
+    "revision": {
+      "type": "integer",
+      "description": "Exact current run revision."
+    },
+    "paper_node": {
+      "type": "object",
+      "description": "Complete paper-node draft, omitted only when no supported candidate was found.",
+      "additionalProperties": true
+    },
+    "edge": {
+      "type": "object",
+      "description": "Complete proposed child edge; omit for a root or unsupported child bridge.",
+      "additionalProperties": true
+    },
+    "reason": {
+      "type": "string",
+      "description": "Evidence-based reason for an empty candidate or edge."
+    },
+    "notes": {
+      "type": "array",
+      "description": "Concise builder handoff notes.",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "run_id",
+    "revision"
+  ]
+}
+```
+
+来源：[`packages/supramas/tool-supramas/src/index.ts`](../packages/supramas/tool-supramas/src/index.ts)
+
+### `supramas_stage1_finalize`
+
+严格校验并原子完成一项不存在开放 frontier 的 Stage 1 工作流。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "run_id": {
+      "type": "string",
+      "description": "Owning deterministic SupraMAS run id."
+    },
+    "revision": {
+      "type": "integer",
+      "description": "Exact current run revision."
+    }
+  },
+  "required": [
+    "run_id",
+    "revision"
+  ]
+}
+```
+
+来源：[`packages/supramas/tool-supramas/src/index.ts`](../packages/supramas/tool-supramas/src/index.ts)
+
+### `supramas_stage1_get`
+
+读取持久 Stage 1 工作流及其唯一合法的下一动作。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "run_id": {
+      "type": "string",
+      "description": "Owning deterministic SupraMAS run id."
+    }
+  },
+  "required": [
+    "run_id"
+  ]
+}
+```
+
+来源：[`packages/supramas/tool-supramas/src/index.ts`](../packages/supramas/tool-supramas/src/index.ts)
+
+### `supramas_stage1_reviewer_submit`
+
+为当前待处理候选项提交 accept、revise 或 reject 决定。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "run_id": {
+      "type": "string",
+      "description": "Owning deterministic SupraMAS run id."
+    },
+    "revision": {
+      "type": "integer",
+      "description": "Exact current run revision."
+    },
+    "decision": {
+      "type": "string",
+      "enum": [
+        "accept",
+        "revise",
+        "reject"
+      ]
+    },
+    "summary": {
+      "type": "string",
+      "description": "Evidence-grounded review summary."
+    },
+    "critical_issues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "target_id": {
+            "type": "string"
+          },
+          "issue": {
+            "type": "string"
+          },
+          "required_action": {
+            "type": "string",
+            "enum": [
+              "revise",
+              "remove",
+              "downgrade",
+              "provide_more_evidence",
+              "answer_question"
+            ]
+          }
+        },
+        "required": [
+          "target_id",
+          "issue",
+          "required_action"
+        ]
+      }
+    },
+    "edge_issues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "target_id": {
+            "type": "string"
+          },
+          "issue": {
+            "type": "string"
+          },
+          "required_action": {
+            "type": "string",
+            "enum": [
+              "revise",
+              "remove",
+              "downgrade",
+              "provide_more_evidence",
+              "answer_question"
+            ]
+          }
+        },
+        "required": [
+          "target_id",
+          "issue",
+          "required_action"
+        ]
+      }
+    },
+    "acceptance_conditions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "run_id",
+    "revision",
+    "decision",
+    "summary",
+    "critical_issues",
+    "edge_issues",
+    "acceptance_conditions"
+  ]
+}
+```
+
+来源：[`packages/supramas/tool-supramas/src/index.ts`](../packages/supramas/tool-supramas/src/index.ts)
+
+### `supramas_stage1_start`
+
+从一项已批准且处于 task-ready 状态的运行启动持久 Stage 1 coordinator。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "run_id": {
+      "type": "string",
+      "description": "Owning deterministic SupraMAS run id."
+    },
+    "revision": {
+      "type": "integer",
+      "description": "Exact task-ready run revision."
+    },
+    "research_topic": {
+      "type": "string",
+      "description": "Approved Stage 1 research topic."
+    },
+    "material_scope": {
+      "type": "array",
+      "description": "Optional material search scope.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "target_property": {
+      "type": "array",
+      "description": "Optional target properties.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "max_depth": {
+      "type": "integer",
+      "description": "Maximum accepted child depth; zero keeps only roots."
+    },
+    "max_root_attempts": {
+      "type": "integer",
+      "description": "Real builder attempt budget for a root."
+    },
+    "max_child_attempts_per_limitation": {
+      "type": "integer",
+      "description": "Real builder attempt budget for each accepted limitation."
+    },
+    "max_branch_per_node": {
+      "type": "integer",
+      "description": "Optional accepted outgoing-edge cap per paper."
+    },
+    "target_child_nodes": {
+      "type": "integer",
+      "description": "Optional accepted child-node target."
+    }
+  },
+  "required": [
+    "run_id",
+    "revision",
+    "research_topic",
+    "max_depth",
+    "max_root_attempts",
+    "max_child_attempts_per_limitation"
+  ]
+}
+```
+
+来源：[`packages/supramas/tool-supramas/src/index.ts`](../packages/supramas/tool-supramas/src/index.ts)
+
+十三个边界明确的材料科学工具提供持久运行控制、带来源约束的证据和 Stage 1 builder/reviewer 状态机，并且不会绕过 reviewer 接收门。
 
 <a id="deepseek-aidsh-tool-fs"></a>
 

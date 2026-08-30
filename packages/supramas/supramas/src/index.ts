@@ -448,7 +448,12 @@ export class SupraMasRuntime extends Service {
       .map(([, record]) => runFromStored(record.snapshot))
   }
 
-  /** Start a durable Stage 1 workflow and atomically enter the running phase. */
+  /**
+   * Start a durable Stage 1 workflow and atomically enter the running phase.
+   * @param ref - Expected current run revision.
+   * @param config - Validated Stage 1 research scope and limits.
+   * @returns the committed workflow and its next action.
+   */
   startStage1(ref: RunRef, config: Stage1WorkflowConfig): Promise<Stage1RunState> {
     return this.enqueue(async () => {
       const record = this.recordAt(ref)
@@ -482,14 +487,23 @@ export class SupraMasRuntime extends Service {
     })
   }
 
-  /** Read a detached workflow plus the exact next builder/reviewer action. */
+  /**
+   * Read a detached workflow plus the exact next builder/reviewer action.
+   * @param id - Stable run identity.
+   * @returns the current workflow state or `undefined` when absent.
+   */
   getStage1(id: SupraMasRunIdBrand): Stage1RunState | undefined {
     const record = this.requireTable().get(id)
     if (record === undefined) return undefined
     return stage1State(record, catalogFromRecord(record))
   }
 
-  /** Persist one builder result under compare-and-set revision control. */
+  /**
+   * Persist one builder result under compare-and-set revision control.
+   * @param ref - Expected current run revision.
+   * @param submission - Builder candidate, edge proposal, or no-result record.
+   * @returns the committed workflow and its next action.
+   */
   submitStage1Builder(ref: RunRef, submission: Stage1BuilderSubmission): Promise<Stage1RunState> {
     return this.enqueue(async () => {
       const record = this.recordAt(ref)
@@ -512,7 +526,12 @@ export class SupraMasRuntime extends Service {
     })
   }
 
-  /** Persist one reviewer decision; only acceptance can add the candidate to the tree. */
+  /**
+   * Persist one reviewer decision; only acceptance can add the candidate to the tree.
+   * @param ref - Expected current run revision.
+   * @param submission - Reviewer decision and actionable findings.
+   * @returns the committed workflow and its next action.
+   */
   submitStage1Review(ref: RunRef, submission: Stage1ReviewSubmission): Promise<Stage1RunState> {
     return this.enqueue(async () => {
       const record = this.recordAt(ref)
@@ -535,7 +554,11 @@ export class SupraMasRuntime extends Service {
     })
   }
 
-  /** Validate and atomically commit the completed workflow and final strategy tree. */
+  /**
+   * Validate and atomically commit the completed workflow and final strategy tree.
+   * @param ref - Expected current run revision.
+   * @returns the completed workflow state and final tree.
+   */
   finalizeStage1(ref: RunRef): Promise<FinalizedStage1RunState> {
     return this.enqueue(async () => {
       const record = this.recordAt(ref)

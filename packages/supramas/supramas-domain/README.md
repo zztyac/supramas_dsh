@@ -11,6 +11,14 @@ English | [中文](README.zh.md)
 
 This pure domain package preserves the current SupraMAS `strategy_tree.json` wire shape and adds a deterministic, resumable builder/reviewer state machine. It enforces one paper per node, stable ids, parent levels, record references, expectation-to-edge agreement, literal evidence quotes, reviewer acceptance gates, real attempt budgets, and terminal recursive frontiers.
 
+## Table of Contents
+
+- [Use this package](#use-this-package)
+- [Understand the implementation](#understand-the-implementation)
+- [Model Experience](#model-experience)
+- [Known Limitations and Deferred Work](#known-limitations-and-deferred-work)
+- [Dev Note](#dev-note)
+
 ## Use this package
 
 Create one `EvidenceCatalog` per job, register each canonical artifact, and add its page-aware chunks. Use `createStage1Workflow`, inspect `nextStage1Action`, submit one builder or reviewer result through the matching function, and call `finalizeStage1Workflow` only when every frontier is terminal. The runtime serializes the workflow and catalog into one durable run record.

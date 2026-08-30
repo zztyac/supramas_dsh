@@ -11,6 +11,14 @@ English | [中文](README.zh.md)
 
 This capability registers `ctx.supramas`, a deterministic material-science run registry backed by the DSH storage-domain service. Each run has a stable identity, compare-and-set revision, constrained phase graph, canonical artifact paths, role allowlists, an isolated evidence catalog, and an optional durable Stage 1 workflow.
 
+## Table of Contents
+
+- [Use this package](#use-this-package)
+- [Understand the implementation](#understand-the-implementation)
+- [Model Experience](#model-experience)
+- [Known Limitations and Deferred Work](#known-limitations-and-deferred-work)
+- [Dev Note](#dev-note)
+
 ## Use this package
 
 Mount the DSH storage stack and this service before any SupraMAS tool consumer. Create a run, advance it to `task_ready`, and call `startStage1()` with the exact revision. Read `getStage1().nextAction`, submit builder/reviewer results through their CAS methods, and call `finalizeStage1()` only after the state machine reports `finalize`. After a restart, transition the recovered revision back to `running`; the exact pending action is preserved.

@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/supramas/README.md
-README.md: c073ae3754ba503355e8c16db47346e35420bf38
-README.zh.md: e590e6eeb1937e771398412d6ef9ac41a1b13ba4
+README.md: 7599ef932615c0d2a38240cfe79ab08a76b6217e
+README.zh.md: 95eb6ae1c99e30f5515e9694bb74617db477b2c4

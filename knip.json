@@ -748,8 +748,15 @@
         "tests/**/*.ts"
       ],
       "ignoreDependencies": [
+        "@deepseek-ai/dsh-api-supramas",
+        "@deepseek-ai/dsh-client-ui-supramas",
         "@deepseek-ai/dsh-supramas",
         "@deepseek-ai/dsh-tool-supramas"
+      ]
+    },
+    "packages/supramas/api-supramas": {
+      "ignoreDependencies": [
+        "zod"
       ]
     },
     "packages/preset/agent-presets": {

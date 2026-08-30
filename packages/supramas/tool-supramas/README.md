@@ -11,6 +11,14 @@ English | [中文](README.zh.md)
 
 This consumer exposes thirteen tools over `ctx.supramas`: four run controls, five durable Stage 1 workflow controls, and four evidence controls. Every tool validates arguments and returns the same stable success or recovery envelope; workflow responses include structured `workflow`, `next_action`, and final `tree` data.
 
+## Table of Contents
+
+- [Use this package](#use-this-package)
+- [Understand the implementation](#understand-the-implementation)
+- [Model Experience](#model-experience)
+- [Known Limitations and Deferred Work](#known-limitations-and-deferred-work)
+- [Dev Note](#dev-note)
+
 ## Use this package
 
 Compose it after `@deepseek-ai/dsh-tools`, the DSH storage stack, and `@deepseek-ai/dsh-supramas`. Model arguments remain snake-case. The coordinator owns `supramas_stage1_*`; builders use paper/chunk tools; reviewers use artifact read/evidence verify. The shipped preset exposes separate foreground `supramas_builder` and `supramas_reviewer` subagents with enforced tool filters.

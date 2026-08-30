@@ -24,6 +24,7 @@ This table connects model-visible tool names to the plugin package and service s
 | `@deepseek-ai/dsh-tool-bash-persistent` | `bash` | `ctx.tools`, `ctx.terminals`, `an owning Agent at execution time` | `tool/call`, `PTY shell state`, `tool/result` | - | One owner-isolated persistent bash tool; deployment composition supplies the PTY backend and may override the model-facing environment description. |
 | `@deepseek-ai/dsh-tool-pwsh-persistent` | `pwsh` | `ctx.tools`, `ctx.terminals`, `an owning Agent at execution time` | `tool/call`, `PTY shell state`, `tool/result` | - | One owner-isolated persistent pwsh tool, the Windows counterpart of the persistent bash tool; deployment composition supplies a pwsh-dialect PTY backend and may override the model-facing environment description. |
 | `@deepseek-ai/dsh-tool-str-replace-editor` | `str_replace_editor` | `ctx.tools`, `ctx.fs` | `tool/call`, `fs/observed after view presence/absence, edit absence, or successful mutation`, `tool/result` | - | Standalone view/create/unique literal replace/line insert tool over the filesystem seam; it composes with any shell or terminal API. |
+| `@deepseek-ai/dsh-tool-supramas` | `supramas_artifact_read`, `supramas_chunk_extract`, `supramas_evidence_verify`, `supramas_paper_store`, `supramas_run_create`, `supramas_run_get`, `supramas_run_list`, `supramas_run_transition`, `supramas_stage1_builder_submit`, `supramas_stage1_finalize`, `supramas_stage1_get`, `supramas_stage1_reviewer_submit`, `supramas_stage1_start` | `ctx.tools`, `ctx.supramas` | `tool/call`, `durable SupraMAS run, evidence, or Stage 1 workflow state`, `tool/result` | - | Thirteen bounded material-science tools expose durable run control, provenance-bound evidence, and the Stage 1 builder/reviewer state machine without bypassing reviewer acceptance. |
 | `@deepseek-ai/dsh-tool-fs` | `edit`, `read`, `read_image`, `write` | `ctx.tools`, `ctx.fs`, `ctx.systemPrompt`, `ctx.attachments (image-tool registration)`, `ctx.llm + an image-capable route (image-tool execution)` | `tool/call`, `fs/write-intent or fs/edit-intent for mutations`, `fs/observed after read presence/absence or successful file operation`, `durable attachment (read_image)`, `tool/result` | - | The read-before-write/edit policy is added by `@deepseek-ai/dsh-fs-observation-policy` (an `fs/*` event-gate plugin, no schema change); a deployment that loads these tools is expected to also load it. The image tool is not registered without `ctx.attachments`; its schema is route-independent, and execution refuses unless the exact routed model declares image input. |
 | `@deepseek-ai/dsh-tool-fs-search` | `glob`, `grep` | `ctx.tools`, `ctx.subprocess`, `ctx.systemPrompt` | `tool/call`, `tool/result` | - | glob and grep are unconditional discovery tools that spawn the packaged ripgrep binary (`@vscode/ripgrep`) through ctx.subprocess as ordinary foreground calls (never background jobs) — no host `rg` install and no shell layer. The catalog uses `sampleOverCapGlobResults: true`; deployments must choose that behavior explicitly. Capped results save the complete formatted list through the optional ctx.spillStore backend; returned locators are follow-up-readable/searchable when the backend exposes local paths in co-located deployments. |
 | `@deepseek-ai/dsh-tool-terminal` | `terminal_close`, `terminal_list`, `terminal_open`, `terminal_read`, `terminal_send`, `terminal_signal` | `ctx.tools`, `ctx.terminals`, `ctx.systemPrompt`, `ctx.jobs at call time for run_in_background` | `tool/call`, `tool/result` | - | The six terminal tools are opt-in and complement one-shot shell/filesystem tools. `terminal_send(run_in_background: true)` registers with `ctx.jobs`; TUI, named key sequences, BEL, resize, auto-start, and cross-agent sharing are absent from the schema. |
@@ -660,6 +661,556 @@ Notes for using the `str_replace` command:
 Source: [`packages/fs/tool-str-replace-editor/src/index.ts`](../packages/fs/tool-str-replace-editor/src/index.ts)
 
 Standalone view/create/unique literal replace/line insert tool over the filesystem seam; it composes with any shell or terminal API.
+
+<a id="deepseek-aidsh-tool-supramas"></a>
+
+## `@deepseek-ai/dsh-tool-supramas`
+
+### `supramas_artifact_read`
+
+Read one detached run-local paper artifact and all persisted evidence chunks.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "run_id": {
+      "type": "string",
+      "description": "Owning deterministic SupraMAS run id."
+    },
+    "paper_id": {
+      "type": "string",
+      "description": "Registered paper identity."
+    }
+  },
+  "required": [
+    "run_id",
+    "paper_id"
+  ]
+}
+```
+
+Source: [`packages/supramas/tool-supramas/src/index.ts`](../packages/supramas/tool-supramas/src/index.ts)
+
+### `supramas_chunk_extract`
+
+Persist one page-aware evidence chunk under an already registered local paper.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "run_id": {
+      "type": "string",
+      "description": "Owning deterministic SupraMAS run id."
+    },
+    "paper_id": {
+      "type": "string",
+      "description": "Owning registered paper identity."
+    },
+    "chunk_id": {
+      "type": "string",
+      "description": "Globally unique run-local chunk identity."
+    },
+    "page": {
+      "type": "integer",
+      "description": "One-based source page when available."
+    },
+    "text": {
+      "type": "string",
+      "description": "Full persisted chunk text, not a paraphrase."
+    }
+  },
+  "required": [
+    "run_id",
+    "paper_id",
+    "chunk_id",
+    "text"
+  ]
+}
+```
+
+Source: [`packages/supramas/tool-supramas/src/index.ts`](../packages/supramas/tool-supramas/src/index.ts)
+
+### `supramas_evidence_verify`
+
+Verify that one literal evidence quote and page resolve to a stored local paper chunk.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "run_id": {
+      "type": "string",
+      "description": "Owning deterministic SupraMAS run id."
+    },
+    "paper_id": {
+      "type": "string",
+      "description": "Expected owning paper identity."
+    },
+    "chunk_id": {
+      "type": "string",
+      "description": "Referenced local chunk identity."
+    },
+    "page": {
+      "type": "integer",
+      "description": "One-based source page when claimed by the record."
+    },
+    "evidence_text": {
+      "type": "string",
+      "description": "Literal quote that must occur in the chunk."
+    }
+  },
+  "required": [
+    "run_id",
+    "paper_id",
+    "chunk_id",
+    "evidence_text"
+  ]
+}
+```
+
+Source: [`packages/supramas/tool-supramas/src/index.ts`](../packages/supramas/tool-supramas/src/index.ts)
+
+### `supramas_paper_store`
+
+Register one verified paper artifact at its canonical run-local papers path.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "run_id": {
+      "type": "string",
+      "description": "Owning deterministic SupraMAS run id."
+    },
+    "paper_id": {
+      "type": "string",
+      "description": "Stable paper identity used by one tree node."
+    },
+    "paper_title": {
+      "type": "string",
+      "description": "Verified publication title."
+    },
+    "local_path": {
+      "type": "string",
+      "description": "Canonical runs/<job_id>/papers/<paper_id>.json path."
+    },
+    "source_type": {
+      "type": "string",
+      "description": "Scientific source classification.",
+      "enum": [
+        "experimental",
+        "review",
+        "theory",
+        "dataset",
+        "unknown"
+      ]
+    }
+  },
+  "required": [
+    "run_id",
+    "paper_id",
+    "paper_title",
+    "local_path",
+    "source_type"
+  ]
+}
+```
+
+Source: [`packages/supramas/tool-supramas/src/index.ts`](../packages/supramas/tool-supramas/src/index.ts)
+
+### `supramas_run_create`
+
+Create one deterministic, revisioned SupraMAS material-science run.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "job_id": {
+      "type": "string",
+      "description": "Stable job id used below runs/<job_id>."
+    },
+    "input_task_path": {
+      "type": "string",
+      "description": "Canonical runs/<job_id>/input_task.yaml path."
+    },
+    "run_dir": {
+      "type": "string",
+      "description": "Canonical runs/<job_id> directory."
+    }
+  },
+  "required": [
+    "job_id",
+    "input_task_path",
+    "run_dir"
+  ]
+}
+```
+
+Source: [`packages/supramas/tool-supramas/src/index.ts`](../packages/supramas/tool-supramas/src/index.ts)
+
+### `supramas_run_get`
+
+Read the current detached snapshot of one SupraMAS run.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "run_id": {
+      "type": "string",
+      "description": "Deterministic run id such as supramas:demo."
+    }
+  },
+  "required": [
+    "run_id"
+  ]
+}
+```
+
+Source: [`packages/supramas/tool-supramas/src/index.ts`](../packages/supramas/tool-supramas/src/index.ts)
+
+### `supramas_run_list`
+
+List all durable SupraMAS runs in stable creation order for discovery and recovery.
+
+```json
+{
+  "type": "object",
+  "properties": {}
+}
+```
+
+Source: [`packages/supramas/tool-supramas/src/index.ts`](../packages/supramas/tool-supramas/src/index.ts)
+
+### `supramas_run_transition`
+
+Advance or resume one durable SupraMAS run with compare-and-set revision protection.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "run_id": {
+      "type": "string",
+      "description": "Deterministic run id such as supramas:demo."
+    },
+    "revision": {
+      "type": "integer",
+      "description": "Exact current revision returned by list or get."
+    },
+    "phase": {
+      "type": "string",
+      "description": "Requested next durable lifecycle phase.",
+      "enum": [
+        "created",
+        "clarifying",
+        "task_ready",
+        "running",
+        "validating",
+        "completed",
+        "recoverable_failed",
+        "failed",
+        "cancelled"
+      ]
+    },
+    "failure_code": {
+      "type": "string",
+      "description": "Stable failure code; required for a failed phase."
+    },
+    "failure_message": {
+      "type": "string",
+      "description": "Actionable failure detail; required for a failed phase."
+    },
+    "failure_retryable": {
+      "type": "boolean",
+      "description": "Whether an operator may safely resume this failure."
+    }
+  },
+  "required": [
+    "run_id",
+    "revision",
+    "phase"
+  ]
+}
+```
+
+Source: [`packages/supramas/tool-supramas/src/index.ts`](../packages/supramas/tool-supramas/src/index.ts)
+
+### `supramas_stage1_builder_submit`
+
+Submit one builder attempt; candidates remain unaccepted until reviewer approval.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "run_id": {
+      "type": "string",
+      "description": "Owning deterministic SupraMAS run id."
+    },
+    "revision": {
+      "type": "integer",
+      "description": "Exact current run revision."
+    },
+    "paper_node": {
+      "type": "object",
+      "description": "Complete paper-node draft, omitted only when no supported candidate was found.",
+      "additionalProperties": true
+    },
+    "edge": {
+      "type": "object",
+      "description": "Complete proposed child edge; omit for a root or unsupported child bridge.",
+      "additionalProperties": true
+    },
+    "reason": {
+      "type": "string",
+      "description": "Evidence-based reason for an empty candidate or edge."
+    },
+    "notes": {
+      "type": "array",
+      "description": "Concise builder handoff notes.",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "run_id",
+    "revision"
+  ]
+}
+```
+
+Source: [`packages/supramas/tool-supramas/src/index.ts`](../packages/supramas/tool-supramas/src/index.ts)
+
+### `supramas_stage1_finalize`
+
+Strictly validate and atomically complete a Stage 1 workflow with no open frontier.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "run_id": {
+      "type": "string",
+      "description": "Owning deterministic SupraMAS run id."
+    },
+    "revision": {
+      "type": "integer",
+      "description": "Exact current run revision."
+    }
+  },
+  "required": [
+    "run_id",
+    "revision"
+  ]
+}
+```
+
+Source: [`packages/supramas/tool-supramas/src/index.ts`](../packages/supramas/tool-supramas/src/index.ts)
+
+### `supramas_stage1_get`
+
+Read the durable Stage 1 workflow and its only legal next action.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "run_id": {
+      "type": "string",
+      "description": "Owning deterministic SupraMAS run id."
+    }
+  },
+  "required": [
+    "run_id"
+  ]
+}
+```
+
+Source: [`packages/supramas/tool-supramas/src/index.ts`](../packages/supramas/tool-supramas/src/index.ts)
+
+### `supramas_stage1_reviewer_submit`
+
+Submit an accept, revise, or reject decision for the current pending candidate.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "run_id": {
+      "type": "string",
+      "description": "Owning deterministic SupraMAS run id."
+    },
+    "revision": {
+      "type": "integer",
+      "description": "Exact current run revision."
+    },
+    "decision": {
+      "type": "string",
+      "enum": [
+        "accept",
+        "revise",
+        "reject"
+      ]
+    },
+    "summary": {
+      "type": "string",
+      "description": "Evidence-grounded review summary."
+    },
+    "critical_issues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "target_id": {
+            "type": "string"
+          },
+          "issue": {
+            "type": "string"
+          },
+          "required_action": {
+            "type": "string",
+            "enum": [
+              "revise",
+              "remove",
+              "downgrade",
+              "provide_more_evidence",
+              "answer_question"
+            ]
+          }
+        },
+        "required": [
+          "target_id",
+          "issue",
+          "required_action"
+        ]
+      }
+    },
+    "edge_issues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "target_id": {
+            "type": "string"
+          },
+          "issue": {
+            "type": "string"
+          },
+          "required_action": {
+            "type": "string",
+            "enum": [
+              "revise",
+              "remove",
+              "downgrade",
+              "provide_more_evidence",
+              "answer_question"
+            ]
+          }
+        },
+        "required": [
+          "target_id",
+          "issue",
+          "required_action"
+        ]
+      }
+    },
+    "acceptance_conditions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "run_id",
+    "revision",
+    "decision",
+    "summary",
+    "critical_issues",
+    "edge_issues",
+    "acceptance_conditions"
+  ]
+}
+```
+
+Source: [`packages/supramas/tool-supramas/src/index.ts`](../packages/supramas/tool-supramas/src/index.ts)
+
+### `supramas_stage1_start`
+
+Start the durable Stage 1 coordinator from one approved task-ready run.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "run_id": {
+      "type": "string",
+      "description": "Owning deterministic SupraMAS run id."
+    },
+    "revision": {
+      "type": "integer",
+      "description": "Exact task-ready run revision."
+    },
+    "research_topic": {
+      "type": "string",
+      "description": "Approved Stage 1 research topic."
+    },
+    "material_scope": {
+      "type": "array",
+      "description": "Optional material search scope.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "target_property": {
+      "type": "array",
+      "description": "Optional target properties.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "max_depth": {
+      "type": "integer",
+      "description": "Maximum accepted child depth; zero keeps only roots."
+    },
+    "max_root_attempts": {
+      "type": "integer",
+      "description": "Real builder attempt budget for a root."
+    },
+    "max_child_attempts_per_limitation": {
+      "type": "integer",
+      "description": "Real builder attempt budget for each accepted limitation."
+    },
+    "max_branch_per_node": {
+      "type": "integer",
+      "description": "Optional accepted outgoing-edge cap per paper."
+    },
+    "target_child_nodes": {
+      "type": "integer",
+      "description": "Optional accepted child-node target."
+    }
+  },
+  "required": [
+    "run_id",
+    "revision",
+    "research_topic",
+    "max_depth",
+    "max_root_attempts",
+    "max_child_attempts_per_limitation"
+  ]
+}
+```
+
+Source: [`packages/supramas/tool-supramas/src/index.ts`](../packages/supramas/tool-supramas/src/index.ts)
+
+Thirteen bounded material-science tools expose durable run control, provenance-bound evidence, and the Stage 1 builder/reviewer state machine without bypassing reviewer acceptance.
 
 <a id="deepseek-aidsh-tool-fs"></a>
 

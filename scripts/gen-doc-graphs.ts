@@ -292,6 +292,21 @@ const SERVICE_ROLES: ServiceRole[] = [
     note: 'Waits for every configured backend, then publishes the domain form as one lifecycle-bound service for typed durable state.',
   },
   {
+    key: 'supramas',
+    pkg: 'supramas',
+    title: 'Durable material-science task runtime',
+    mode: 'core',
+    consumers: ['api-supramas', 'tool-supramas'],
+    note: 'Owns Stage 1 run state, evidence catalogs, role authority, compare-and-set lifecycle transitions, and restart recovery over the domain storage facility.',
+  },
+  {
+    key: 'supramasController',
+    pkg: 'api-supramas',
+    title: 'Host SupraMAS Remote controller',
+    mode: 'core',
+    note: 'Projects safe versioned material-task views and lifecycle commands onto the generated Host Remote namespace for browser clients.',
+  },
+  {
     key: 'messageFeedback',
     pkg: 'message-feedback',
     title: 'Lifecycle-bound message feedback',

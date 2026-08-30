@@ -1,0 +1,335 @@
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { Context } from '@deepseek-ai/cordis'
+import Storage from '@deepseek-ai/dsh-storage'
+import {
+  apply as storageJsonApply,
+  Config as storageJsonConfig,
+  inject as storageJsonInject,
+  name as storageJsonName,
+} from '@deepseek-ai/dsh-storage-json'
+import {
+  apply as storageDomainApply,
+  Config as storageDomainConfig,
+  inject as storageDomainInject,
+  name as storageDomainName,
+} from '@deepseek-ai/dsh-storage-domain'
+import SupraMasRuntime, {
+  SupraMasDomainError,
+  SupraMasError,
+  SupraMasRunId,
+  type Stage1NextAction,
+  type Stage1RunState,
+} from '@deepseek-ai/dsh-supramas'
+import { TypertRemoteFailure, remoteMethods } from '@deepseek-ai/dsh-typert-protocol'
+import SupraMasController from '../src/index.ts'
+
+const contexts: Context[] = []
+const roots: string[] = []
+
+async function harness(): Promise<{ controller: SupraMasController; ctx: Context }> {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-api-supramas-'))
+  roots.push(root)
+  const ctx = new Context()
+  contexts.push(ctx)
+  await ctx.plugin(Storage)
+  await ctx.plugin({
+    name: storageJsonName,
+    inject: storageJsonInject,
+    apply: storageJsonApply,
+    Config: storageJsonConfig,
+  }, { root })
+  await ctx.plugin({
+    name: storageDomainName,
+    inject: storageDomainInject,
+    apply: storageDomainApply,
+    Config: storageDomainConfig,
+  }, { backend: 'json' })
+  await ctx.plugin(SupraMasRuntime)
+  await ctx.plugin(SupraMasController)
+  return { controller: ctx.supramasController, ctx }
+}
+
+afterEach(async () => {
+  await Promise.all(contexts.splice(0).map(ctx => ctx.fiber.dispose()))
+  await Promise.all(roots.splice(0).map(root => rm(root, {
+    recursive: true,
+    force: true,
+    maxRetries: 10,
+    retryDelay: 100,
+  })))
+})
+
+const request = {
+  jobId: 'ui-stage1-demo',
+  researchTopic: 'REBCO artificial pinning centres',
+  materialScope: ['REBCO', 'YBCO'],
+  targetProperty: ['in-field Jc'],
+  maxDepth: 2,
+}
+
+describe('SupraMAS Remote contract', () => {
+  it('publishes one versioned namespace with the complete task control surface', async () => {
+    const { controller } = await harness()
+    expect(controller.typertRemote).toMatchObject({
+      serviceKey: 'supramasController',
+      namespace: 'supramas',
+    })
+    expect(remoteMethods(controller)).toEqual([
+      { method: 'list', invocation: { kind: 'direct' } },
+      { method: 'get', invocation: { kind: 'direct' } },
+      { method: 'createStage1', invocation: { kind: 'direct' } },
+      { method: 'resume', invocation: { kind: 'direct' } },
+      { method: 'cancel', invocation: { kind: 'direct' } },
+    ])
+  })
+
+  it('creates, prepares, and starts one Stage 1 run with safe defaults', async () => {
+    const { controller } = await harness()
+    const created = await controller.createStage1(request)
+
+    expect(created).toMatchObject({
+      apiVersion: 1,
+      run: {
+        id: 'supramas:ui-stage1-demo',
+        jobId: 'ui-stage1-demo',
+        phase: 'running',
+        revision: 3,
+      },
+      stage1: {
+        status: 'active',
+        researchTopic: request.researchTopic,
+        materialScope: request.materialScope,
+        targetProperty: request.targetProperty,
+        limits: {
+          maxDepth: 2,
+          maxRootAttempts: 3,
+          maxChildAttemptsPerLimitation: 2,
+          maxBranchPerNode: null,
+          targetChildNodes: null,
+        },
+        progress: {
+          acceptedPapers: 0,
+          strategyLinks: 0,
+          openLimitations: 0,
+          builderAttempts: 0,
+          reviews: 0,
+        },
+        nextAction: { kind: 'build_root', attemptIndex: 1 },
+      },
+    })
+    expect(created.run).not.toHaveProperty('inputTaskPath')
+    expect(created.run).not.toHaveProperty('runDir')
+
+    await expect(controller.list()).resolves.toEqual({
+      apiVersion: 1,
+      items: [created],
+    })
+    await expect(controller.get(created.run.id)).resolves.toEqual(created)
+  })
+
+  it('resumes recoverable work and cancels with compare-and-set revisions', async () => {
+    const { controller, ctx } = await harness()
+    const created = await controller.createStage1(request)
+    const failed = await ctx.supramas.transition({
+      id: SupraMasRunId(created.run.id),
+      revision: created.run.revision,
+    }, {
+      phase: 'recoverable_failed',
+      failure: { code: 'network-timeout', message: 'Literature search timed out.', retryable: true },
+    })
+
+    const resumed = await controller.resume(failed.id, failed.revision)
+    expect(resumed.run).toMatchObject({ phase: 'running', revision: failed.revision + 1 })
+    const cancelled = await controller.cancel(resumed.run.id, resumed.run.revision)
+    expect(cancelled.run).toMatchObject({ phase: 'cancelled', revision: resumed.run.revision + 1 })
+  })
+
+  it('maps caller-correctable failures without leaking runtime internals', async () => {
+    const { controller } = await harness()
+    const created = await controller.createStage1(request)
+
+    await expect(controller.createStage1(request)).rejects.toMatchObject({
+      failure: { code: 'supramas-run-exists', details: { jobId: request.jobId } },
+    })
+    await expect(controller.get('supramas:missing')).rejects.toMatchObject({
+      failure: { code: 'supramas-run-not-found', details: { runId: 'supramas:missing' } },
+    })
+    await expect(controller.cancel(created.run.id, 1)).rejects.toMatchObject({
+      failure: {
+        code: 'supramas-stale-revision',
+        details: { runId: created.run.id, expectedRevision: 1, actualRevision: 3 },
+      },
+    })
+    await expect(controller.resume(created.run.id, created.run.revision)).rejects.toMatchObject({
+      failure: {
+        code: 'supramas-invalid-transition',
+        details: { runId: created.run.id, phase: 'running' },
+      },
+    })
+    await expect(controller.createStage1({ ...request, researchTopic: '  ' })).rejects.toBeInstanceOf(TypertRemoteFailure)
+    await expect(controller.createStage1({ ...request, researchTopic: '  ' })).rejects.toMatchObject({
+      failure: { code: 'bad-request' },
+    })
+  })
+
+  it('normalizes optional input and rejects every malformed scalar or list shape', async () => {
+    const { controller } = await harness()
+    const generated = await controller.createStage1({
+      researchTopic: '  REBCO interfaces  ',
+      maxDepth: 0,
+      maxRootAttempts: 1,
+      maxChildAttemptsPerLimitation: 1,
+      maxBranchPerNode: 2,
+      targetChildNodes: null,
+    })
+    expect(generated.run.jobId).toMatch(/^materials-/)
+    expect(generated.stage1).toMatchObject({
+      researchTopic: 'REBCO interfaces',
+      materialScope: [],
+      targetProperty: [],
+      limits: {
+        maxDepth: 0,
+        maxRootAttempts: 1,
+        maxChildAttemptsPerLimitation: 1,
+        maxBranchPerNode: 2,
+        targetChildNodes: null,
+      },
+    })
+
+    const invalidRequests = [
+      { ...request, jobId: 'contains spaces' },
+      { ...request, researchTopic: 42 },
+      { ...request, materialScope: 'REBCO' },
+      { ...request, materialScope: ['REBCO', ' '] },
+      { ...request, maxDepth: Number.NaN },
+      { ...request, maxDepth: -1 },
+      { ...request, maxBranchPerNode: 0 },
+    ]
+    for (const invalid of invalidRequests) {
+      await expect(controller.createStage1(invalid as never)).rejects.toMatchObject({
+        failure: { code: 'bad-request' },
+      })
+    }
+    await expect(controller.get('bad-id')).rejects.toMatchObject({ failure: { code: 'bad-request' } })
+    await expect(controller.get(42 as never)).rejects.toMatchObject({ failure: { code: 'bad-request' } })
+    await expect(controller.cancel(generated.run.id, Number.NaN)).rejects.toMatchObject({
+      failure: { code: 'bad-request' },
+    })
+    await expect(controller.cancel(generated.run.id, 0)).rejects.toMatchObject({
+      failure: { code: 'bad-request' },
+    })
+  })
+
+  it('projects every durable next action and both optional state branches', async () => {
+    const { controller, ctx } = await harness()
+    const raw = await ctx.supramas.create({
+      jobId: 'not-started',
+      runDir: 'runs/not-started',
+      inputTaskPath: 'runs/not-started/input_task.yaml',
+    })
+    await expect(controller.get(raw.id)).resolves.not.toHaveProperty('stage1')
+
+    const created = await controller.createStage1(request)
+    const state = ctx.supramas.getStage1(SupraMasRunId(created.run.id))!
+    const actions: Stage1NextAction[] = [
+      {
+        kind: 'build_child',
+        parent_node_id: 'node-1',
+        parent_limitation_id: 'lim-1',
+        parent_expectation: 'Improve angular pinning',
+        attempt_index: 2,
+        prior_attempts: [],
+      },
+      { kind: 'review_candidate', scope: 'root', attempt_index: 1, revision_round: 1, paper_id: 'paper-1' },
+      {
+        kind: 'revise_candidate',
+        scope: 'child',
+        attempt_index: 2,
+        revision_round: 3,
+        paper_id: 'paper-2',
+        critical_issues: [{} as never],
+        edge_issues: [{} as never],
+        acceptance_conditions: ['Verify the quote'],
+      },
+      { kind: 'finalize' },
+      { kind: 'completed', tree: {} as never },
+      { kind: 'failed', reason: 'attempts_exhausted' },
+    ]
+    const getStage1 = vi.spyOn(ctx.supramas, 'getStage1')
+    for (const nextAction of actions) {
+      getStage1.mockReturnValue({
+        ...state,
+        workflow: {
+          ...state.workflow,
+          config: {
+            ...state.workflow.config,
+            materialScope: undefined,
+            targetProperty: undefined,
+          },
+          nodes: [{} as never],
+          edges: [{} as never],
+          frontiers: [
+            { status: 'pending' } as never,
+            { status: 'closed' } as never,
+          ],
+          builder_attempts: [{} as never],
+          review_log: [{} as never],
+        },
+        nextAction,
+      } as unknown as Stage1RunState)
+      const projected = await controller.get(created.run.id)
+      expect(projected.stage1?.nextAction.kind).toBe(nextAction.kind)
+      expect(projected.stage1?.materialScope).toEqual([])
+      expect(projected.stage1?.targetProperty).toEqual([])
+      expect(projected.stage1?.progress).toEqual({
+        acceptedPapers: 1,
+        strategyLinks: 1,
+        openLimitations: 1,
+        builderAttempts: 1,
+        reviews: 1,
+      })
+    }
+  })
+
+  it('projects run failures and exhaustively classifies runtime failures', async () => {
+    const { controller, ctx } = await harness()
+    const created = await controller.createStage1(request)
+    const failed = await ctx.supramas.transition({
+      id: SupraMasRunId(created.run.id),
+      revision: created.run.revision,
+    }, {
+      phase: 'recoverable_failed',
+      failure: { code: 'network', message: 'Network interrupted.', retryable: true },
+    })
+    await expect(controller.get(failed.id)).resolves.toMatchObject({
+      run: { failure: { code: 'network', retryable: true } },
+    })
+
+    type FailureMapper = {
+      mapFailure(
+        error: unknown,
+        context: { jobId?: string; runId?: string; expectedRevision?: number },
+      ): TypertRemoteFailure
+    }
+    const mapFailure = (error: unknown, context: Parameters<FailureMapper['mapFailure']>[1]) =>
+      (controller as unknown as FailureMapper).mapFailure(error, context)
+    const remote = new TypertRemoteFailure({ code: 'bad-request', message: 'remote', details: {} })
+    expect(mapFailure(remote, {})).toBe(remote)
+    expect(mapFailure(new SupraMasDomainError('domain', 'SUPRAMAS_DOMAIN_INVALID'), {}).failure.code)
+      .toBe('bad-request')
+    expect(mapFailure(new Error('unknown'), {}).failure.code).toBe('internal')
+    expect(mapFailure(new SupraMasError('invalid', 'SUPRAMAS_INVALID_REQUEST'), {}).failure.code)
+      .toBe('bad-request')
+    expect(mapFailure(new SupraMasError('exists', 'SUPRAMAS_RUN_EXISTS'), {}).failure.details)
+      .toEqual({ jobId: 'unknown' })
+    expect(mapFailure(new SupraMasError('missing', 'SUPRAMAS_RUN_NOT_FOUND'), {}).failure.details)
+      .toEqual({ runId: 'unknown' })
+    expect(mapFailure(new SupraMasError('stale', 'SUPRAMAS_STALE_REVISION'), {}).failure.details)
+      .toEqual({ runId: 'unknown', expectedRevision: 0, actualRevision: 0 })
+    expect(mapFailure(new SupraMasError('transition', 'SUPRAMAS_INVALID_TRANSITION'), {}).failure.details)
+      .toEqual({ runId: 'unknown', phase: 'failed' })
+  })
+})
