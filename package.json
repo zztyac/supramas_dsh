@@ -33,6 +33,8 @@
     "lint:fix:contracts-ready": "tsx scripts/run-oxlint.ts --config .oxlintrc.staged.json packages/typert/generator/tests/fixtures/type-model --fix && tsx scripts/run-oxlint.ts . --fix",
     "duplication": "jscpd --config .jscpd.json packages scripts",
     "test": "vitest run",
+    "test:supramas": "vitest run packages/supramas packages/bundle/supramas",
+    "verify:supramas": "npm run build:lib:host && npm run typecheck:contracts-ready && npm run test:supramas",
     "test:coverage": "vitest run --coverage",
     "test:coverage:partitioned": "tsx scripts/run-coverage-partitions.ts",
     "test:e2e": "vitest run --config vitest.e2e.config.ts",

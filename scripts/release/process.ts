@@ -4,8 +4,58 @@
  */
 
 import { spawn, spawnSync } from 'node:child_process'
-import { realpathSync } from 'node:fs'
+import { existsSync, realpathSync } from 'node:fs'
+import { delimiter, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+
+/**
+ * One executable plus arguments safe for shell-free child_process launch.
+ */
+export interface ReleaseInvocation {
+  readonly command: string
+  readonly args: readonly string[]
+}
+
+/** Resolve the npm CLI installed beside one PATH entry. */
+function windowsNpmCli(environment: NodeJS.ProcessEnv): string {
+  const path = environment.Path ?? environment.PATH ?? ''
+  for (const entry of path.split(delimiter)) {
+    if (entry === '') continue
+    const candidate = join(entry, 'node_modules', 'npm', 'bin', 'npm-cli.js')
+    if (existsSync(candidate)) return candidate
+  }
+  throw new Error('release command npm requires an npm CLI reachable from PATH on Windows')
+}
+
+/**
+ * Resolve Windows package-manager shims to their JavaScript CLIs under the
+ * current Node executable. This avoids both `.cmd` spawn failures and a shell
+ * command line assembled from release-graph arguments.
+ * @param command - executable name supplied by a release step.
+ * @param args - command arguments supplied by the release step.
+ * @param options - environment used by the child.
+ * @param platform - host platform, injectable for contract tests.
+ * @returns a shell-free executable and argument vector.
+ */
+export function releaseInvocation(
+  command: string,
+  args: readonly string[],
+  options: RunOptions = {},
+  platform: NodeJS.Platform = process.platform,
+): ReleaseInvocation {
+  if (platform !== 'win32') return { command, args }
+  const environment = options.env ?? process.env
+  const node = environment.npm_node_execpath ?? process.execPath
+  if (command === 'pnpm') {
+    const cli = environment.npm_execpath
+    if (cli === undefined || !cli.toLowerCase().includes('pnpm')) {
+      throw new Error('release command pnpm must be invoked through pnpm run on Windows')
+    }
+    return { command: node, args: [cli, ...args] }
+  }
+  if (command === 'npm') return { command: node, args: [windowsNpmCli(environment), ...args] }
+  return { command, args }
+}
 
 /** Where and with what environment a release step runs a command. */
 export interface RunOptions {
@@ -29,7 +79,12 @@ export interface CommandResult {
  * @returns The exit status and captured streams.
  */
 export function attempt(command: string, args: readonly string[], options: RunOptions = {}): CommandResult {
-  const result = spawnSync(command, [...args], { cwd: options.cwd, env: options.env, encoding: 'utf8' })
+  const invocation = releaseInvocation(command, args, options)
+  const result = spawnSync(invocation.command, [...invocation.args], {
+    cwd: options.cwd,
+    env: options.env,
+    encoding: 'utf8',
+  })
   if (result.error !== undefined) throw result.error
   return { status: result.status, stdout: result.stdout, stderr: result.stderr }
 }
@@ -43,7 +98,8 @@ export function attempt(command: string, args: readonly string[], options: RunOp
  * @returns The exit status and captured streams.
  */
 export function attemptEchoed(command: string, args: readonly string[], options: RunOptions = {}): CommandResult {
-  const result = spawnSync(command, [...args], {
+  const invocation = releaseInvocation(command, args, options)
+  const result = spawnSync(invocation.command, [...invocation.args], {
     cwd: options.cwd,
     env: options.env,
     encoding: 'utf8',
@@ -81,7 +137,12 @@ export function capture(command: string, args: readonly string[], options: RunOp
  */
 export function runConcurrent(command: string, args: readonly string[], options: RunOptions = {}): Promise<void> {
   return new Promise((resolveRun, rejectRun) => {
-    const child = spawn(command, [...args], { cwd: options.cwd, env: options.env, stdio: 'inherit' })
+    const invocation = releaseInvocation(command, args, options)
+    const child = spawn(invocation.command, [...invocation.args], {
+      cwd: options.cwd,
+      env: options.env,
+      stdio: 'inherit',
+    })
     child.once('error', rejectRun)
     child.once('close', (status, signal) => {
       if (status === 0) resolveRun()

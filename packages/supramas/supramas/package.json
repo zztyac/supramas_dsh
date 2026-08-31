@@ -24,7 +24,7 @@
     },
     "./roles": {
       "types": "./lib/types/roles.d.ts",
-      "default": "./lib/roles.js"
+      "default": "./lib/types/roles.js"
     },
     "./types": {
       "types": "./lib/types/types.d.ts",
