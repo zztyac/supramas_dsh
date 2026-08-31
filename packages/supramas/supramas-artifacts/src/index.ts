@@ -2,7 +2,7 @@
 
 import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import { writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
+import { writeBytesAtomic, writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 import {
   type SupraMasRunIdBrand,
 } from '@deepseek-ai/dsh-supramas'
@@ -53,6 +53,7 @@ declare module '@deepseek-ai/cordis' {
 const DEFAULT_EVIDENCE_POLICY =
   'Use literature search to find papers, persist selected paper evidence locally, and use no placeholder papers.'
 const DEFAULT_EXCLUDE = ['Stage 2 idea generation', 'abstract-only evidence']
+const SAFE_PAPER_FILE_ID = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/
 
 /**
  * Resolve artifact writer configuration before any filesystem operation.
@@ -193,6 +194,49 @@ export class SupraMasArtifacts extends Service {
 
   private write(path: string, content: string): Promise<void> {
     return writeFileAtomic(this.absolute(path), content, { mode: 0o600, dirMode: 0o700 })
+  }
+
+  private writeBytes(path: string, content: Uint8Array): Promise<void> {
+    return writeBytesAtomic(this.absolute(path), content, { mode: 0o600, dirMode: 0o700 })
+  }
+
+  private paperSourceRelative(runJobId: string, paperId: string): string {
+    if (!SAFE_PAPER_FILE_ID.test(paperId)) throw new Error('supramas-artifacts: paperId is not filename-safe')
+    return `runs/${runJobId}/papers/raw/${paperId}.pdf`
+  }
+
+  /**
+   * Atomically publish one verified source PDF under the canonical run-local raw directory.
+   * The method accepts an owning run id and a filename-safe paper id, never an arbitrary path.
+   * @param id - Owning durable run identity.
+   * @param paperId - Stable filename-safe paper identity.
+   * @param bytes - Complete verified PDF bytes.
+   * @returns the canonical path relative to the configured workspace root.
+   */
+  writePaperSource(id: SupraMasRunIdBrand, paperId: string, bytes: Uint8Array): Promise<string> {
+    return this.enqueue(async () => {
+      const run = this.ctx.supramas.get(id)
+      if (run === undefined) throw new Error(`supramas-artifacts: run ${id} was not found`)
+      const path = this.paperSourceRelative(run.jobId, paperId)
+      if (bytes.byteLength === 0) throw new Error('supramas-artifacts: paper source must not be empty')
+      await this.writeBytes(path, new Uint8Array(bytes))
+      return path
+    })
+  }
+
+  /**
+   * Resolve the existing canonical source path for an internal parser.
+   * This absolute path is an execution boundary and must never be returned by model-facing tools.
+   * @param id - Owning durable run identity.
+   * @param paperId - Stable filename-safe paper identity.
+   * @returns the canonical absolute source path for internal parser use.
+   */
+  async resolvePaperSourcePath(id: SupraMasRunIdBrand, paperId: string): Promise<string> {
+    const run = this.ctx.supramas.get(id)
+    if (run === undefined) throw new Error(`supramas-artifacts: run ${id} was not found`)
+    const path = this.absolute(this.paperSourceRelative(run.jobId, paperId))
+    await access(path)
+    return path
   }
 
   /**

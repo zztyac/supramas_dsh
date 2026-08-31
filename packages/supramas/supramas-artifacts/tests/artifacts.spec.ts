@@ -149,6 +149,27 @@ describe('SupraMAS compatibility artifacts', () => {
     expect(() => resolveArtifactsSpec({ root: 'relative' })).toThrow('absolute')
   })
 
+  it('atomically writes exact source PDF bytes only to a canonical run-local path', async () => {
+    const { ctx, root } = await setup()
+    const run = await ctx.supramas.create({
+      jobId: 'source-demo',
+      inputTaskPath: 'runs/source-demo/input_task.yaml',
+      runDir: 'runs/source-demo',
+    })
+    const source = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x00, 0xff])
+    const path = await ctx.supramasArtifacts.writePaperSource(run.id, 'arxiv_cond-mat_0406087', source)
+    expect(path).toBe('runs/source-demo/papers/raw/arxiv_cond-mat_0406087.pdf')
+    expect(new Uint8Array(await readFile(join(root, path)))).toEqual(source)
+    expect(await ctx.supramasArtifacts.resolvePaperSourcePath(run.id, 'arxiv_cond-mat_0406087')).toBe(join(root, path))
+    expect((await readdir(join(root, 'runs/source-demo/papers/raw'))).filter(name => name.endsWith('.tmp'))).toEqual([])
+
+    for (const unsafe of ['../escape', 'nested/paper', 'drive:paper', '.hidden']) {
+      await expect(ctx.supramasArtifacts.writePaperSource(run.id, unsafe, source)).rejects.toThrow('filename-safe')
+    }
+    await expect(ctx.supramasArtifacts.writePaperSource(run.id, 'paper-empty', new Uint8Array(0)))
+      .rejects.toThrow('must not be empty')
+  })
+
   it('writes the original Stage 1 task, paper, tree, review log, report, and audit state', async () => {
     const { ctx, root } = await setup()
     const completed = await complete(ctx)

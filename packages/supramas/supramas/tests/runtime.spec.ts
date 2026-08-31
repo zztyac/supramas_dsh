@@ -193,6 +193,35 @@ describe('SupraMasRuntime', () => {
     })).rejects.toThrow('disappeared after chunk storage')
   })
 
+  it('imports a complete paper atomically and leaves no partial paper on validation failure', async () => {
+    const ctx = await setup()
+    const created = await ctx.supramas.create(request)
+    const metadata = {
+      paper_id: 'paper-atomic',
+      paper_title: 'Atomic evidence import',
+      local_path: 'runs/stage1-demo/papers/paper-atomic.json',
+      source_type: 'experimental' as const,
+    }
+    await expect(ctx.supramas.importPaper(created.id, {
+      metadata,
+      chunks: [
+        { chunk_id: 'paper-atomic-p1-c1', page: 1, text: 'first page evidence' },
+        { chunk_id: 'paper-atomic-p1-c1', page: 2, text: 'duplicate id must fail' },
+      ],
+    })).rejects.toThrow(expect.objectContaining({ code: 'SUPRAMAS_DUPLICATE_ID' }))
+    expect(ctx.supramas.readPaper(created.id, metadata.paper_id)).toBeUndefined()
+
+    const imported = await ctx.supramas.importPaper(created.id, {
+      metadata,
+      chunks: [
+        { chunk_id: 'paper-atomic-p1-c1', page: 1, text: 'first page evidence' },
+        { chunk_id: 'paper-atomic-p2-c1', page: 2, text: 'second page evidence' },
+      ],
+    })
+    expect(imported.chunks).toHaveLength(2)
+    expect(ctx.supramas.readPaper(created.id, metadata.paper_id)).toEqual(imported)
+  })
+
   it('fails reads before the runtime storage service is initialized', () => {
     const runtime = new SupraMasRuntime(new Context())
     expect(() => runtime.list()).toThrow('runtime is not started yet')

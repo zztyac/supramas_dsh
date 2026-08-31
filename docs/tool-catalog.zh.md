@@ -29,6 +29,7 @@
 | `@deepseek-ai/dsh-tool-pwsh-persistent` | `pwsh` | `ctx.tools`、`ctx.terminals`、`an owning Agent at execution time` | `tool/call`、`PTY shell state`、`tool/result` | - | 一个按所有者隔离的持久 pwsh 工具，持久 bash 工具的 Windows 对应物；部署组合提供 pwsh 方言的 PTY 后端，并可覆盖面向模型的环境描述。 |
 | `@deepseek-ai/dsh-tool-str-replace-editor` | `str_replace_editor` | `ctx.tools`、`ctx.fs` | `tool/call`、`fs/observed after view presence/absence, edit absence, or successful mutation`、`tool/result` | - | 基于文件系统 seam 的独立查看／创建／唯一字面量替换／按行插入工具；可与任何 shell 或终端接口组合。 |
 | `@deepseek-ai/dsh-tool-supramas` | `supramas_artifact_read`、`supramas_artifacts_sync`、`supramas_chunk_extract`、`supramas_evidence_verify`、`supramas_paper_store`、`supramas_run_create`、`supramas_run_get`、`supramas_run_list`、`supramas_run_transition`、`supramas_stage1_builder_submit`、`supramas_stage1_finalize`、`supramas_stage1_get`、`supramas_stage1_reviewer_submit`、`supramas_stage1_start` | `ctx.tools`、`ctx.supramas`、`ctx.supramasArtifacts` | `tool/call`、`durable SupraMAS run, evidence, or Stage 1 workflow state`、`workspace-confined Stage 1 compatibility files`、`tool/result` | - | 十四个边界明确的材料科学工具提供持久运行控制、带来源约束的证据、兼容文件修复和 Stage 1 builder/reviewer 状态机，并且不会绕过 reviewer 接收门。 |
+| `@deepseek-ai/dsh-tool-supramas-literature` | `supramas_chunk_list`、`supramas_chunk_read`、`supramas_literature_search`、`supramas_paper_import` | `ctx.tools`、`ctx.supramas`、`ctx.supramasLiterature`、`ctx.supramasPaperIngest` | `tool/call`、`durable paper and evidence import through ctx.supramasPaperIngest`、`tool/result` | - | 四个有界工具提供不透明候选检索、完整论文导入、无正文分块索引和分页证据读取，不公开文档 URL 或绝对路径。 |
 | `@deepseek-ai/dsh-tool-fs` | `edit`、`read`、`read_image`、`write` | `ctx.tools`、`ctx.fs`、`ctx.systemPrompt`、`ctx.attachments (image-tool registration)`、`ctx.llm + an image-capable route (image-tool execution)` | `tool/call`、`fs/write-intent or fs/edit-intent for mutations`、`fs/observed after read presence/absence or successful file operation`、`durable attachment (read_image)`、`tool/result` | - | 先读后写／编辑策略由 `@deepseek-ai/dsh-fs-observation-policy` 添加；它是一个 `fs/*` 事件门禁插件，不会改变 schema。加载这些工具的部署按预期也应加载该插件。没有 `ctx.attachments` 时图片工具不会注册；其 schema 与路由无关，执行时除非确切路由的模型声明图片输入，否则拒绝。 |
 | `@deepseek-ai/dsh-tool-fs-search` | `glob`、`grep` | `ctx.tools`、`ctx.subprocess`、`ctx.systemPrompt` | `tool/call`、`tool/result` | - | glob 和 grep 是无条件可用的发现工具，通过 ctx.subprocess spawn 随包提供的 ripgrep 二进制文件（`@vscode/ripgrep`），并作为普通前台调用运行，绝不作为后台任务；无需在宿主机安装 `rg`，也不经过 shell 层。本目录使用 `sampleOverCapGlobResults: true`；部署必须显式选择该行为。结果超过上限时，会通过可选的 ctx.spillStore 后端保存完整的格式化列表；在共置部署中，如果后端公开本地路径，返回的定位信息可供后续读取／搜索。 |
 | `@deepseek-ai/dsh-tool-terminal` | `terminal_close`、`terminal_list`、`terminal_open`、`terminal_read`、`terminal_send`、`terminal_signal` | `ctx.tools`、`ctx.terminals`、`ctx.systemPrompt`、`ctx.jobs at call time for run_in_background` | `tool/call`、`tool/result` | - | 这 6 个终端工具需要选择启用，用于补充一次性 bash／文件系统工具。`terminal_send(run_in_background: true)` 会注册到 `ctx.jobs`；schema 不包含 TUI、具名按键序列、BEL、调整尺寸、自动启动和跨 agent 共享。 |
@@ -674,7 +675,7 @@ pwsh 工具是 Windows 组合中 bash 执行器 seam 的 PowerShell 方言消费
 
 ### `supramas_artifact_read`
 
-读取一项隔离的运行内论文产物及其全部持久证据文本块。
+读取一项运行内论文的有界元数据，不返回完整证据文本。
 
 ```json
 {
@@ -1256,6 +1257,136 @@ pwsh 工具是 Windows 组合中 bash 执行器 seam 的 PowerShell 方言消费
 来源：[`packages/supramas/tool-supramas/src/index.ts`](../packages/supramas/tool-supramas/src/index.ts)
 
 十四个边界明确的材料科学工具提供持久运行控制、带来源约束的证据、兼容文件修复和 Stage 1 builder/reviewer 状态机，并且不会绕过 reviewer 接收门。
+
+<a id="deepseek-aidsh-tool-supramas-literature"></a>
+
+## `@deepseek-ai/dsh-tool-supramas-literature`
+
+### `supramas_chunk_list`
+
+列出一篇已导入论文的有界分块 ID、页码和字符数，不返回完整正文。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "run_id": {
+      "type": "string"
+    },
+    "paper_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "run_id",
+    "paper_id"
+  ]
+}
+```
+
+来源：[`packages/supramas/tool-supramas-literature/src/index.ts`](../packages/supramas/tool-supramas-literature/src/index.ts)
+
+### `supramas_chunk_read`
+
+读取一个已存证据分块的有界切片；不会返回整篇论文或 PDF。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "run_id": {
+      "type": "string"
+    },
+    "paper_id": {
+      "type": "string"
+    },
+    "chunk_id": {
+      "type": "string"
+    },
+    "offset": {
+      "type": "integer",
+      "description": "Zero-based character offset; defaults to zero."
+    },
+    "max_chars": {
+      "type": "integer",
+      "description": "Requested characters within the configured read cap."
+    }
+  },
+  "required": [
+    "run_id",
+    "paper_id",
+    "chunk_id"
+  ]
+}
+```
+
+来源：[`packages/supramas/tool-supramas-literature/src/index.ts`](../packages/supramas/tool-supramas-literature/src/index.ts)
+
+### `supramas_literature_search`
+
+检索结构化学术索引，返回有界的不透明候选，不公开文档下载 URL。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "query": {
+      "type": "string",
+      "description": "Specific material-science literature query."
+    },
+    "max_results": {
+      "type": "integer",
+      "description": "Requested candidates within the configured tool cap."
+    }
+  },
+  "required": [
+    "query",
+    "max_results"
+  ]
+}
+```
+
+来源：[`packages/supramas/tool-supramas-literature/src/index.ts`](../packages/supramas/tool-supramas-literature/src/index.ts)
+
+### `supramas_paper_import`
+
+获取、校验、解析、分块并原子持久化一个由服务签发的开放获取论文候选。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "run_id": {
+      "type": "string",
+      "description": "Owning deterministic SupraMAS run id."
+    },
+    "candidate_id": {
+      "type": "string",
+      "description": "Opaque candidate id returned by supramas_literature_search."
+    },
+    "source_type": {
+      "type": "string",
+      "description": "Scientific source classification.",
+      "enum": [
+        "experimental",
+        "review",
+        "theory",
+        "dataset",
+        "unknown"
+      ]
+    }
+  },
+  "required": [
+    "run_id",
+    "candidate_id",
+    "source_type"
+  ]
+}
+```
+
+来源：[`packages/supramas/tool-supramas-literature/src/index.ts`](../packages/supramas/tool-supramas-literature/src/index.ts)
+
+四个有界工具提供不透明候选检索、完整论文导入、无正文分块索引和分页证据读取，不公开文档 URL 或绝对路径。
 
 <a id="deepseek-aidsh-tool-fs"></a>
 

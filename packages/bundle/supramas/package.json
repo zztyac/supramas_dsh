@@ -26,7 +26,14 @@
     "@deepseek-ai/dsh-client-ui-supramas": "workspace:^",
     "@deepseek-ai/dsh-supramas": "workspace:^",
     "@deepseek-ai/dsh-supramas-artifacts": "workspace:^",
-    "@deepseek-ai/dsh-tool-supramas": "workspace:^"
+    "@deepseek-ai/dsh-supramas-literature": "workspace:^",
+    "@deepseek-ai/dsh-supramas-literature-openalex": "workspace:^",
+    "@deepseek-ai/dsh-supramas-paper-http": "workspace:^",
+    "@deepseek-ai/dsh-supramas-paper-ingest": "workspace:^",
+    "@deepseek-ai/dsh-supramas-pdf-pypdf": "workspace:^",
+    "@deepseek-ai/dsh-tool-supramas": "workspace:^",
+    "@deepseek-ai/dsh-tool-supramas-literature": "workspace:^",
+    "@deepseek-ai/dsh-web-fetch-http": "workspace:^"
   },
   "peerDependencies": {
     "@deepseek-ai/dsh-invariants": "workspace:^",

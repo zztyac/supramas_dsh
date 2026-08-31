@@ -2,10 +2,18 @@
 
 import type { Branded } from '@deepseek-ai/dsh-brand'
 import type {
+  EvidenceChunk,
+  PaperArtifactMetadata,
   Stage1NextAction,
   Stage1Workflow,
   StrategyTree,
 } from '@deepseek-ai/dsh-supramas-domain'
+
+/** Complete paper import validated in memory before one durable record replacement. */
+export interface PaperImportRequest {
+  readonly metadata: PaperArtifactMetadata
+  readonly chunks: readonly EvidenceChunk[]
+}
 
 /** Stable identity of one SupraMAS run. */
 export type SupraMasRunId = Branded<'SupraMasRunId'>

@@ -6,9 +6,21 @@
       name: '@deepseek-ai/dsh-supramas-artifacts'
       config:
         root: !!js process.cwd()
+    - id: supramas-literature
+      name: '@deepseek-ai/dsh-supramas-literature'
+    - id: supramas-literature-openalex
+      name: '@deepseek-ai/dsh-supramas-literature-openalex'
+    - id: supramas-paper-http
+      name: '@deepseek-ai/dsh-supramas-paper-http'
+    - id: supramas-pdf-pypdf
+      name: '@deepseek-ai/dsh-supramas-pdf-pypdf'
+    - id: supramas-paper-ingest
+      name: '@deepseek-ai/dsh-supramas-paper-ingest'
     - id: api-supramas
       name: '@deepseek-ai/dsh-api-supramas'
     - id: tool-supramas
       name: '@deepseek-ai/dsh-tool-supramas'
+    - id: tool-supramas-literature
+      name: '@deepseek-ai/dsh-tool-supramas-literature'
     - id: client-ui-supramas
       name: '@deepseek-ai/dsh-client-ui-supramas'

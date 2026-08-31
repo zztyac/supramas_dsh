@@ -51,7 +51,10 @@ import * as ToolFs from '@deepseek-ai/dsh-tool-fs'
 import * as ToolFsSearch from '@deepseek-ai/dsh-tool-fs-search'
 import * as ToolStrReplaceEditor from '@deepseek-ai/dsh-tool-str-replace-editor'
 import type { SupraMasRuntime } from '@deepseek-ai/dsh-supramas'
+import type { SupraMasLiterature } from '@deepseek-ai/dsh-supramas-literature'
+import type { SupraMasPaperIngest } from '@deepseek-ai/dsh-supramas-paper-ingest'
 import * as ToolSupraMas from '@deepseek-ai/dsh-tool-supramas'
+import * as ToolSupraMasLiterature from '@deepseek-ai/dsh-tool-supramas-literature'
 import TerminalSessionService from '@deepseek-ai/dsh-terminal'
 import * as ToolPty from '@deepseek-ai/dsh-tool-terminal'
 import * as ToolGoal from '@deepseek-ai/dsh-tool-goal'
@@ -332,6 +335,21 @@ const TOOL_PACKAGES: ToolPackage[] = [
     },
     note:
       'Fourteen bounded material-science tools expose durable run control, provenance-bound evidence, compatibility-file repair, and the Stage 1 builder/reviewer state machine without bypassing reviewer acceptance.',
+  },
+  {
+    pkg: '@deepseek-ai/dsh-tool-supramas-literature',
+    dir: 'tool-supramas-literature',
+    source: 'packages/supramas/tool-supramas-literature/src/index.ts',
+    requires: ['ctx.tools', 'ctx.supramas', 'ctx.supramasLiterature', 'ctx.supramasPaperIngest'],
+    writes: ['tool/call', 'durable paper and evidence import through ctx.supramasPaperIngest', 'tool/result'],
+    async mount(ctx) {
+      ctx.provide('supramas', {} as unknown as SupraMasRuntime)
+      ctx.provide('supramasLiterature', {} as unknown as SupraMasLiterature)
+      ctx.provide('supramasPaperIngest', {} as unknown as SupraMasPaperIngest)
+      await ctx.plugin(ToolSupraMasLiterature)
+    },
+    note:
+      'Four bounded tools expose opaque-candidate search, complete paper import, text-free chunk indexes, and paginated evidence reads without document URLs or absolute paths.',
   },
   {
     pkg: '@deepseek-ai/dsh-tool-fs',

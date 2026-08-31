@@ -23,6 +23,7 @@ import { supraMasDomainSpec, type SupraMasRunRecord } from './spec.ts'
 import type {
   CreateRunRequest,
   FinalizedStage1RunState,
+  PaperImportRequest,
   RunFailure,
   RunPhase,
   RunRef,
@@ -371,6 +372,34 @@ export class SupraMasRuntime extends Service {
       }
       const catalog = catalogFromRecord(current)
       const artifact = catalog.storePaper(metadata)
+      await table.put(id, {
+        ...current,
+        papers: { ...current.papers, [artifact.paper_id]: artifact },
+      })
+      this.evidence.set(id, catalog)
+      return artifact
+    })
+  }
+
+  /**
+   * Validate and persist one paper plus all of its page-aware chunks as one storage mutation.
+   * Any invalid metadata or chunk fails before the durable record and process catalog change.
+   * @param id - Stable owning run identity.
+   * @param request - Complete paper metadata and extracted chunk set.
+   * @returns the detached complete stored artifact.
+   */
+  importPaper(id: SupraMasRunIdBrand, request: PaperImportRequest): Promise<PaperArtifact> {
+    return this.enqueue(async () => {
+      const table = this.requireTable()
+      const current = table.get(id)
+      if (current === undefined) {
+        throw new SupraMasError(`SupraMAS run ${id} does not exist`, 'SUPRAMAS_RUN_NOT_FOUND')
+      }
+      const catalog = catalogFromRecord(current)
+      const empty = catalog.storePaper(request.metadata)
+      for (const chunk of request.chunks) catalog.addChunk(empty.paper_id, chunk)
+      const artifact = catalog.getPaper(empty.paper_id)
+      if (artifact === undefined) throw new Error(`SupraMAS paper ${empty.paper_id} disappeared during atomic import`)
       await table.put(id, {
         ...current,
         papers: { ...current.papers, [artifact.paper_id]: artifact },

@@ -2321,6 +2321,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'a detached empty artifact.',
       },
       {
+        signature: 'importPaper(id: SupraMasRunIdBrand, request: PaperImportRequest): Promise<PaperArtifact>',
+        description: 'Validate and persist one paper plus all of its page-aware chunks as one storage mutation. Any invalid metadata or chunk fails before the durable record and process catalog change.',
+        parameters: [{ name: 'id', description: 'Stable owning run identity.' }, { name: 'request', description: 'Complete paper metadata and extracted chunk set.' }],
+        returns: 'the detached complete stored artifact.',
+      },
+      {
         signature: 'addEvidenceChunk(id: SupraMasRunIdBrand, paperId: string, chunk: EvidenceChunk): Promise<EvidenceChunk>',
         description: 'Add one provenance-bound chunk to a stored paper.',
         parameters: [{ name: 'id', description: 'Stable owning run identity.' }, { name: 'paperId', description: 'Owning paper identity.' }, { name: 'chunk', description: 'Local page-aware evidence text.' }],
@@ -2394,6 +2400,18 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     description: 'Workspace-confined writer for the Codex-native Stage 1 file layout.',
     methods: [
       {
+        signature: 'writePaperSource(id: SupraMasRunIdBrand, paperId: string, bytes: Uint8Array): Promise<string>',
+        description: 'Atomically publish one verified source PDF under the canonical run-local raw directory. The method accepts an owning run id and a filename-safe paper id, never an arbitrary path.',
+        parameters: [{ name: 'id', description: 'Owning durable run identity.' }, { name: 'paperId', description: 'Stable filename-safe paper identity.' }, { name: 'bytes', description: 'Complete verified PDF bytes.' }],
+        returns: 'the canonical path relative to the configured workspace root.',
+      },
+      {
+        signature: 'async resolvePaperSourcePath(id: SupraMasRunIdBrand, paperId: string): Promise<string>',
+        description: 'Resolve the existing canonical source path for an internal parser. This absolute path is an execution boundary and must never be returned by model-facing tools.',
+        parameters: [{ name: 'id', description: 'Owning durable run identity.' }, { name: 'paperId', description: 'Stable filename-safe paper identity.' }],
+        returns: 'the canonical absolute source path for internal parser use.',
+      },
+      {
         signature: 'syncTask(id: SupraMasRunIdBrand): Promise<string>',
         description: 'Materialize the current approved task definition.',
         parameters: [{ name: 'id', description: 'Owning durable run identity.' }],
@@ -2459,6 +2477,68 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Cancel one non-terminal run under compare-and-set revision control.',
         parameters: [{ name: 'runId', description: 'Stable public run identity.' }, { name: 'expectedRevision', description: 'Revision observed by the caller.' }],
         returns: 'the committed cancelled task view.',
+      },
+    ],
+  },
+  {
+    key: 'supramasLiterature',
+    summary: 'Registry and execution owner for structured scholarly-index providers.',
+    description: 'Registry and execution owner for structured scholarly-index providers.',
+    methods: [
+      {
+        signature: 'registerIndexProvider(provider: LiteratureIndexProvider): () => void',
+        description: 'Register one provider for the calling fiber and return an eager disposer.',
+        parameters: [{ name: 'provider', description: 'Structured scholarly-index provider with a stable id.' }],
+        returns: 'a disposer that removes the provider registration.',
+      },
+      {
+        signature: 'registerAcquisitionProvider(provider: PaperAcquisitionProvider): () => void',
+        description: 'Register one acquisition provider for the calling fiber.',
+        parameters: [{ name: 'provider', description: 'Safe complete-byte acquisition provider with a stable id.' }],
+        returns: 'a disposer that removes the provider registration.',
+      },
+      {
+        signature: 'registerParserProvider(provider: DocumentParserProvider): () => void',
+        description: 'Register one isolated document parser for the calling fiber.',
+        parameters: [{ name: 'provider', description: 'Bounded parser provider with a stable id.' }],
+        returns: 'a disposer that removes the provider registration.',
+      },
+      {
+        signature: 'async search(request: LiteratureSearchRequest, signal?: AbortSignal): Promise<LiteratureSearchResult>',
+        description: 'Search one selected structured index with complete service-owned bounds.',
+        parameters: [{ name: 'request', description: 'Normalized query and requested result bound.' }, { name: 'signal', description: 'Optional cancellation signal forwarded to the provider.' }],
+        returns: 'bounded, deduplicated candidates with opaque ids.',
+      },
+      {
+        signature: 'async resolve(candidateId: string, signal?: AbortSignal): Promise<ResolvedLiteratureCandidate>',
+        description: 'Resolve one service-issued opaque id through its owning provider.',
+        parameters: [{ name: 'candidateId', description: 'Opaque provider-qualified candidate identity.' }, { name: 'signal', description: 'Optional cancellation signal forwarded to the provider.' }],
+        returns: 'the validated candidate and any internal acquisition metadata.',
+      },
+      {
+        signature: 'async acquire(candidateId: string, signal?: AbortSignal): Promise<AcquiredPaper>',
+        description: 'Resolve and acquire one open-access PDF without accepting caller-supplied metadata or URLs.',
+        parameters: [{ name: 'candidateId', description: 'Opaque provider-qualified candidate identity.' }, { name: 'signal', description: 'Optional cancellation signal forwarded through acquisition.' }],
+        returns: 'complete verified PDF bytes plus safe candidate metadata and digest.',
+      },
+      {
+        signature: 'async parseDocument(path: string, signal?: AbortSignal): Promise<DocumentParseResult>',
+        description: 'Parse and revalidate one local source through the explicitly selected isolated parser.',
+        parameters: [{ name: 'path', description: 'Canonical absolute source path owned by the harness.' }, { name: 'signal', description: 'Optional cancellation signal forwarded to the parser.' }],
+        returns: 'normalized page-aware text within configured limits.',
+      },
+    ],
+  },
+  {
+    key: 'supramasPaperIngest',
+    summary: 'Coordinator for acquire -> persist source -> parse -> chunk -> one durable evidence import.',
+    description: 'Coordinator for acquire -> persist source -> parse -> chunk -> one durable evidence import.',
+    methods: [
+      {
+        signature: 'async importCandidate( runId: SupraMasRunIdBrand, candidateId: string, sourceType: SourceType = \'unknown\', signal?: AbortSignal, ): Promise<PaperImportSummary>',
+        description: 'Import one resolved literature candidate into an existing run. Durable metadata and all chunks commit in one runtime mutation after parsing succeeds.',
+        parameters: [{ name: 'runId', description: 'Owning durable SupraMAS run identity.' }, { name: 'candidateId', description: 'Opaque provider-qualified literature candidate identity.' }, { name: 'sourceType', description: 'Scientific provenance classification stored with the paper.' }, { name: 'signal', description: 'Optional cancellation signal forwarded through acquire and parse.' }],
+        returns: 'a public-safe summary of the completed durable import.',
       },
     ],
   },
@@ -3542,6 +3622,10 @@ export const EVENT_API: readonly EventApiEntry[] = [
 /** Shapes of every exported type the Service and Event signatures reference (transitively), sorted by name. */
 export const TYPE_API: readonly TypeApiEntry[] = [
   {
+    name: 'AcquiredPaper',
+    declaration: 'export interface AcquiredPaper {\n    readonly candidate: ResolvedLiteratureCandidate;\n    readonly finalUrl: string;\n    readonly mediaType: \'application/pdf\';\n    readonly byteLength: number;\n    readonly sha256: string;\n    readonly bytes: Uint8Array;\n}',
+  },
+  {
     name: 'AdapterRegistrationHandle',
     declaration: 'export interface AdapterRegistrationHandle {\n    (): void;\n    replace(providers: string[]): void;\n}',
   },
@@ -4050,6 +4134,18 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface DirectoryRegistrationHandle {\n    (): void;\n    replace(entries: readonly LlmConfigurableProvider[]): void;\n}',
   },
   {
+    name: 'DocumentParseRequest',
+    declaration: 'export interface DocumentParseRequest {\n    readonly path: string;\n    readonly maxPages: number;\n    readonly maxPageChars: number;\n    readonly maxTotalChars: number;\n}',
+  },
+  {
+    name: 'DocumentParseResult',
+    declaration: 'export interface DocumentParseResult {\n    readonly pages: readonly ParsedDocumentPage[];\n}',
+  },
+  {
+    name: 'DocumentParserProvider',
+    declaration: 'export interface DocumentParserProvider {\n    readonly id: string;\n    available: () => boolean;\n    parse: (request: DocumentParseRequest, signal?: AbortSignal) => Promise<DocumentParseResult>;\n}',
+  },
+  {
     name: 'Domain',
     declaration: 'export interface Domain<S extends DomainSpec> {\n    readonly name: string;\n    readonly global: DomainGlobalHandleOf<S>;\n    table<N extends keyof S[\'tables\'] & string>(name: N): KvTable<TableKeyOf<S, N>, TableValueOf<S, N>>;\n    close(): Promise<void>;\n}',
   },
@@ -4422,6 +4518,30 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface LimitationRecord {\n    limitation_id: string;\n    limitation: string;\n    expectation: string;\n    related_record_ids?: string[];\n    evidence: EvidenceRef;\n    confidence: number;\n}',
   },
   {
+    name: 'LiteratureCandidate',
+    declaration: 'export interface LiteratureCandidate extends Omit<LiteratureProviderCandidate, \'externalId\'> {\n    readonly candidateId: string;\n    readonly source: string;\n}',
+  },
+  {
+    name: 'LiteratureIndexProvider',
+    declaration: 'export interface LiteratureIndexProvider {\n    readonly id: string;\n    available: () => boolean;\n    search: (request: LiteratureSearchRequest, signal?: AbortSignal) => Promise<LiteratureProviderSearchResult>;\n    resolve: (externalId: string, signal?: AbortSignal) => Promise<ResolvedLiteratureProviderCandidate>;\n}',
+  },
+  {
+    name: 'LiteratureProviderCandidate',
+    declaration: 'export interface LiteratureProviderCandidate {\n    readonly externalId: string;\n    readonly title: string;\n    readonly authors: readonly string[];\n    readonly year?: number;\n    readonly doi?: string;\n    readonly venue?: string;\n    readonly abstract?: string;\n    readonly citedByCount?: number;\n    readonly openAccess?: boolean;\n    readonly landingUrl?: string;\n}',
+  },
+  {
+    name: 'LiteratureProviderSearchResult',
+    declaration: 'export interface LiteratureProviderSearchResult {\n    readonly candidates: readonly LiteratureProviderCandidate[];\n    readonly truncated: boolean;\n}',
+  },
+  {
+    name: 'LiteratureSearchRequest',
+    declaration: 'export interface LiteratureSearchRequest {\n    readonly query: string;\n    readonly maxResults: number;\n}',
+  },
+  {
+    name: 'LiteratureSearchResult',
+    declaration: 'export interface LiteratureSearchResult {\n    readonly candidates: readonly LiteratureCandidate[];\n    readonly truncated: boolean;\n}',
+  },
+  {
     name: 'LlmAdapter',
     declaration: 'export abstract class LlmAdapter {\n    providerInfo(provider: string): LlmProviderInfo;\n    providerRetryPolicy(_provider: string): ResolvedRetryPolicy | undefined;\n    imageRequestPricing(_provider: string, _model: string): LlmImageRequestPricing | undefined;\n    listModels(_provider: string): Promise<readonly LlmModelInfo[]>;\n    resolveModel(provider: string, model: string, _signal?: AbortSignal): Promise<LlmResolvedModelInfo>;\n    async prepareCall(provider: string, model: string, signal?: AbortSignal): Promise<PreparedAdapterCall>;\n    abstract stream(options: GenerateOptions): AsyncIterable<StreamChunk>;\n}',
   },
@@ -4666,6 +4786,18 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface OneShotSubagentDescriptorData extends SubagentDescriptorBase {\n    readonly mode: \'one-shot\';\n    readonly label?: string;\n}',
   },
   {
+    name: 'PaperAcquisitionProvider',
+    declaration: 'export interface PaperAcquisitionProvider {\n    readonly id: string;\n    available: () => boolean;\n    acquire: (request: PaperAcquisitionRequest, signal?: AbortSignal) => Promise<PaperAcquisitionProviderResult>;\n}',
+  },
+  {
+    name: 'PaperAcquisitionProviderResult',
+    declaration: 'export interface PaperAcquisitionProviderResult {\n    readonly url: string;\n    readonly statusCode: number;\n    readonly mediaType: string;\n    readonly bytes: Uint8Array;\n}',
+  },
+  {
+    name: 'PaperAcquisitionRequest',
+    declaration: 'export interface PaperAcquisitionRequest {\n    readonly url: string;\n    readonly maxBytes: number;\n}',
+  },
+  {
     name: 'PaperArtifact',
     declaration: 'export interface PaperArtifact extends PaperArtifactMetadata {\n    chunks: EvidenceChunk[];\n}',
   },
@@ -4674,12 +4806,24 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface PaperArtifactMetadata {\n    paper_id: string;\n    paper_title: string;\n    local_path: string;\n    source_type: SourceType;\n}',
   },
   {
+    name: 'PaperImportRequest',
+    declaration: 'export interface PaperImportRequest {\n    readonly metadata: PaperArtifactMetadata;\n    readonly chunks: readonly EvidenceChunk[];\n}',
+  },
+  {
+    name: 'PaperImportSummary',
+    declaration: 'export interface PaperImportSummary {\n    readonly paperId: string;\n    readonly paperTitle: string;\n    readonly sourcePath: string;\n    readonly artifactPath: string;\n    readonly sourceSha256: string;\n    readonly sourceBytes: number;\n    readonly pageCount: number;\n    readonly chunkCount: number;\n}',
+  },
+  {
     name: 'PaperNode',
     declaration: 'export interface PaperNode {\n    node_id: string;\n    level: number;\n    parent_id?: string | null;\n    paper_id: string;\n    paper_title: string;\n    year?: number | null;\n    doi?: string | null;\n    url?: string | null;\n    source_type?: SourceType;\n    notes?: string[];\n    strategy_records: StrategyRecord[];\n    limitation_records: LimitationRecord[];\n}',
   },
   {
     name: 'PaperNodeDraft',
     declaration: 'export type PaperNodeDraft = Omit<PaperNode, \'node_id\' | \'level\' | \'parent_id\'>;',
+  },
+  {
+    name: 'ParsedDocumentPage',
+    declaration: 'export interface ParsedDocumentPage {\n    readonly pageNumber: number;\n    readonly text: string;\n}',
   },
   {
     name: 'PermissionSelect',
@@ -4844,6 +4988,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'ResolvedCredential',
     declaration: 'export interface ResolvedCredential {\n    value: string;\n    source: string;\n}',
+  },
+  {
+    name: 'ResolvedLiteratureCandidate',
+    declaration: 'export interface ResolvedLiteratureCandidate extends Omit<ResolvedLiteratureProviderCandidate, \'externalId\'> {\n    readonly candidateId: string;\n    readonly source: string;\n}',
+  },
+  {
+    name: 'ResolvedLiteratureProviderCandidate',
+    declaration: 'export interface ResolvedLiteratureProviderCandidate extends LiteratureProviderCandidate {\n    readonly documentUrl?: string;\n    readonly documentMediaType?: string;\n    readonly license?: string;\n}',
   },
   {
     name: 'ResolvedNormalRetryPolicy',

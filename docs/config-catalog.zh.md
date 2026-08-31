@@ -2557,6 +2557,96 @@ export interface Config {
 
 来源：[`packages/supramas/supramas-artifacts/src/index.ts:20`](../packages/supramas/supramas-artifacts/src/index.ts)
 
+<a id="deepseek-aidsh-supramas-literature"></a>
+
+## `@deepseek-ai/dsh-supramas-literature`
+
+```ts config-catalog
+/** Provider selection and request limits. */
+export interface LiteratureConfig {
+  /** Explicit structured-index provider id. Omitted means exactly one usable provider must exist. */
+  readonly indexProvider?: string
+  /** Explicit PDF acquisition provider id. Omitted means exactly one usable provider must exist. */
+  readonly acquisitionProvider?: string
+  /** Explicit full-text parser provider id. Omitted means exactly one usable provider must exist. */
+  readonly parserProvider?: string
+  /** Largest accepted result count on one search. */
+  readonly maxResults?: number
+  /** Largest accepted normalized query in UTF-16 code units. */
+  readonly maxQueryChars?: number
+  /** Smallest accepted PDF body; rejects HTML error stubs and empty placeholder files. */
+  readonly minDocumentBytes?: number
+  /** Largest accepted complete PDF body. */
+  readonly maxDocumentBytes?: number
+  /** Largest accepted source page count. */
+  readonly maxParsedPages?: number
+  /** Largest accepted extracted characters on one page. */
+  readonly maxPageChars?: number
+  /** Largest accepted extracted characters across one document. */
+  readonly maxTotalChars?: number
+}
+```
+
+来源：[`packages/supramas/supramas-literature/src/index.ts:35`](../packages/supramas/supramas-literature/src/index.ts)
+
+<a id="deepseek-aidsh-supramas-paper-http"></a>
+
+## `@deepseek-ai/dsh-supramas-paper-http`
+
+需要：`supramasLiterature`
+
+```ts config-catalog
+/** Transport policy for open scholarly documents. */
+export interface Config {
+  /** Maximum wall-clock milliseconds for one complete acquisition. */
+  readonly timeoutMs?: number
+  /** Maximum same-origin redirects followed before rejecting the source. */
+  readonly maxRedirects?: number
+  /** Non-empty HTTP User-Agent sent to scholarly document hosts. */
+  readonly userAgent?: string
+}
+```
+
+来源：[`packages/supramas/supramas-paper-http/src/index.ts:25`](../packages/supramas/supramas-paper-http/src/index.ts)
+
+<a id="deepseek-aidsh-supramas-paper-ingest"></a>
+
+## `@deepseek-ai/dsh-supramas-paper-ingest`
+
+需要：`supramas` · `supramasArtifacts` · `supramasLiterature`
+
+```ts config-catalog
+/** Deterministic evidence chunk policy. */
+export interface Config {
+  /** Maximum characters stored in one deterministic evidence chunk. */
+  readonly maxChunkChars?: number
+  /** Characters repeated between adjacent chunks on the same page. */
+  readonly overlapChars?: number
+}
+```
+
+来源：[`packages/supramas/supramas-paper-ingest/src/index.ts:14`](../packages/supramas/supramas-paper-ingest/src/index.ts)
+
+<a id="deepseek-aidsh-supramas-pdf-pypdf"></a>
+
+## `@deepseek-ai/dsh-supramas-pdf-pypdf`
+
+需要：`subprocess` · `supramasLiterature`
+
+```ts config-catalog
+/** Parser process policy. */
+export interface Config {
+  /** Harness-selected Python executable that provides the pypdf module. */
+  readonly pythonExecutable?: string
+  /** Maximum wall-clock milliseconds for one parse process. */
+  readonly timeoutMs?: number
+  /** Grace period before forced process-tree termination after cancellation. */
+  readonly graceMs?: number
+}
+```
+
+来源：[`packages/supramas/supramas-pdf-pypdf/src/index.ts:56`](../packages/supramas/supramas-pdf-pypdf/src/index.ts)
+
 <a id="deepseek-aidsh-system-prompt"></a>
 
 ## `@deepseek-ai/dsh-system-prompt`
@@ -3048,6 +3138,28 @@ export interface Config {
 
 来源：[`packages/subagent/tool-subagent-report/src/index.ts:27`](../packages/subagent/tool-subagent-report/src/index.ts)
 
+<a id="deepseek-aidsh-tool-supramas-literature"></a>
+
+## `@deepseek-ai/dsh-tool-supramas-literature`
+
+需要：`tools` · `supramas` · `supramasLiterature` · `supramasPaperIngest`
+
+```ts config-catalog
+/** Tool presentation and result bounds. */
+export interface Config {
+  /** Largest candidate count accepted and returned by one search tool call. */
+  readonly maxSearchResults?: number
+  /** Maximum abstract characters projected for one search candidate. */
+  readonly maxAbstractChars?: number
+  /** Maximum text-free chunk descriptors returned by one list call. */
+  readonly maxChunkIndexEntries?: number
+  /** Maximum characters returned by one paginated chunk read. */
+  readonly maxChunkReadChars?: number
+}
+```
+
+来源：[`packages/supramas/tool-supramas-literature/src/index.ts:17`](../packages/supramas/tool-supramas-literature/src/index.ts)
+
 <a id="deepseek-aidsh-tool-terminal"></a>
 
 ## `@deepseek-ai/dsh-tool-terminal`
@@ -3287,7 +3399,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/web/web-fetch-http/src/index.ts:32`](../packages/web/web-fetch-http/src/index.ts)
+来源：[`packages/web/web-fetch-http/src/index.ts:42`](../packages/web/web-fetch-http/src/index.ts)
 
 <a id="deepseek-aidsh-web-search-deepseek"></a>
 
@@ -3491,6 +3603,7 @@ export interface Config {
 - `@deepseek-ai/dsh-subagent`（[`packages/subagent/subagent/src/index.ts`](../packages/subagent/subagent/src/index.ts)）
 - `@deepseek-ai/dsh-subprocess-local`（[`packages/subprocess/subprocess-local/src/index.ts`](../packages/subprocess/subprocess-local/src/index.ts)）
 - `@deepseek-ai/dsh-supramas` — 需要 `storageDomain`（[`packages/supramas/supramas/src/index.ts`](../packages/supramas/supramas/src/index.ts)）
+- `@deepseek-ai/dsh-supramas-literature-openalex` — 需要 `web` · `supramasLiterature`（[`packages/supramas/supramas-literature-openalex/src/index.ts`](../packages/supramas/supramas-literature-openalex/src/index.ts)）
 - `@deepseek-ai/dsh-terminal`（[`packages/terminal/terminal/src/index.ts`](../packages/terminal/terminal/src/index.ts)）
 - `@deepseek-ai/dsh-tool-ask-user` — 需要 `tools` · `userInteraction`（[`packages/interaction/tool-ask-user/src/index.ts`](../packages/interaction/tool-ask-user/src/index.ts)）
 - `@deepseek-ai/dsh-tool-call-timeout-policy` — 需要 `tools`（[`packages/guard/timeout-policy/src/index.ts`](../packages/guard/timeout-policy/src/index.ts)）

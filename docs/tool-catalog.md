@@ -25,6 +25,7 @@ This table connects model-visible tool names to the plugin package and service s
 | `@deepseek-ai/dsh-tool-pwsh-persistent` | `pwsh` | `ctx.tools`, `ctx.terminals`, `an owning Agent at execution time` | `tool/call`, `PTY shell state`, `tool/result` | - | One owner-isolated persistent pwsh tool, the Windows counterpart of the persistent bash tool; deployment composition supplies a pwsh-dialect PTY backend and may override the model-facing environment description. |
 | `@deepseek-ai/dsh-tool-str-replace-editor` | `str_replace_editor` | `ctx.tools`, `ctx.fs` | `tool/call`, `fs/observed after view presence/absence, edit absence, or successful mutation`, `tool/result` | - | Standalone view/create/unique literal replace/line insert tool over the filesystem seam; it composes with any shell or terminal API. |
 | `@deepseek-ai/dsh-tool-supramas` | `supramas_artifact_read`, `supramas_artifacts_sync`, `supramas_chunk_extract`, `supramas_evidence_verify`, `supramas_paper_store`, `supramas_run_create`, `supramas_run_get`, `supramas_run_list`, `supramas_run_transition`, `supramas_stage1_builder_submit`, `supramas_stage1_finalize`, `supramas_stage1_get`, `supramas_stage1_reviewer_submit`, `supramas_stage1_start` | `ctx.tools`, `ctx.supramas`, `ctx.supramasArtifacts` | `tool/call`, `durable SupraMAS run, evidence, or Stage 1 workflow state`, `workspace-confined Stage 1 compatibility files`, `tool/result` | - | Fourteen bounded material-science tools expose durable run control, provenance-bound evidence, compatibility-file repair, and the Stage 1 builder/reviewer state machine without bypassing reviewer acceptance. |
+| `@deepseek-ai/dsh-tool-supramas-literature` | `supramas_chunk_list`, `supramas_chunk_read`, `supramas_literature_search`, `supramas_paper_import` | `ctx.tools`, `ctx.supramas`, `ctx.supramasLiterature`, `ctx.supramasPaperIngest` | `tool/call`, `durable paper and evidence import through ctx.supramasPaperIngest`, `tool/result` | - | Four bounded tools expose opaque-candidate search, complete paper import, text-free chunk indexes, and paginated evidence reads without document URLs or absolute paths. |
 | `@deepseek-ai/dsh-tool-fs` | `edit`, `read`, `read_image`, `write` | `ctx.tools`, `ctx.fs`, `ctx.systemPrompt`, `ctx.attachments (image-tool registration)`, `ctx.llm + an image-capable route (image-tool execution)` | `tool/call`, `fs/write-intent or fs/edit-intent for mutations`, `fs/observed after read presence/absence or successful file operation`, `durable attachment (read_image)`, `tool/result` | - | The read-before-write/edit policy is added by `@deepseek-ai/dsh-fs-observation-policy` (an `fs/*` event-gate plugin, no schema change); a deployment that loads these tools is expected to also load it. The image tool is not registered without `ctx.attachments`; its schema is route-independent, and execution refuses unless the exact routed model declares image input. |
 | `@deepseek-ai/dsh-tool-fs-search` | `glob`, `grep` | `ctx.tools`, `ctx.subprocess`, `ctx.systemPrompt` | `tool/call`, `tool/result` | - | glob and grep are unconditional discovery tools that spawn the packaged ripgrep binary (`@vscode/ripgrep`) through ctx.subprocess as ordinary foreground calls (never background jobs) — no host `rg` install and no shell layer. The catalog uses `sampleOverCapGlobResults: true`; deployments must choose that behavior explicitly. Capped results save the complete formatted list through the optional ctx.spillStore backend; returned locators are follow-up-readable/searchable when the backend exposes local paths in co-located deployments. |
 | `@deepseek-ai/dsh-tool-terminal` | `terminal_close`, `terminal_list`, `terminal_open`, `terminal_read`, `terminal_send`, `terminal_signal` | `ctx.tools`, `ctx.terminals`, `ctx.systemPrompt`, `ctx.jobs at call time for run_in_background` | `tool/call`, `tool/result` | - | The six terminal tools are opt-in and complement one-shot shell/filesystem tools. `terminal_send(run_in_background: true)` registers with `ctx.jobs`; TUI, named key sequences, BEL, resize, auto-start, and cross-agent sharing are absent from the schema. |
@@ -668,7 +669,7 @@ Standalone view/create/unique literal replace/line insert tool over the filesyst
 
 ### `supramas_artifact_read`
 
-Read one detached run-local paper artifact and all persisted evidence chunks.
+Read bounded metadata for one run-local paper without returning its full evidence text.
 
 ```json
 {
@@ -1250,6 +1251,136 @@ Start the durable Stage 1 coordinator from one approved task-ready run.
 Source: [`packages/supramas/tool-supramas/src/index.ts`](../packages/supramas/tool-supramas/src/index.ts)
 
 Fourteen bounded material-science tools expose durable run control, provenance-bound evidence, compatibility-file repair, and the Stage 1 builder/reviewer state machine without bypassing reviewer acceptance.
+
+<a id="deepseek-aidsh-tool-supramas-literature"></a>
+
+## `@deepseek-ai/dsh-tool-supramas-literature`
+
+### `supramas_chunk_list`
+
+List bounded chunk identities, pages, and character counts for one imported paper without returning full text.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "run_id": {
+      "type": "string"
+    },
+    "paper_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "run_id",
+    "paper_id"
+  ]
+}
+```
+
+Source: [`packages/supramas/tool-supramas-literature/src/index.ts`](../packages/supramas/tool-supramas-literature/src/index.ts)
+
+### `supramas_chunk_read`
+
+Read one bounded slice of one stored evidence chunk; never returns an entire paper or PDF.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "run_id": {
+      "type": "string"
+    },
+    "paper_id": {
+      "type": "string"
+    },
+    "chunk_id": {
+      "type": "string"
+    },
+    "offset": {
+      "type": "integer",
+      "description": "Zero-based character offset; defaults to zero."
+    },
+    "max_chars": {
+      "type": "integer",
+      "description": "Requested characters within the configured read cap."
+    }
+  },
+  "required": [
+    "run_id",
+    "paper_id",
+    "chunk_id"
+  ]
+}
+```
+
+Source: [`packages/supramas/tool-supramas-literature/src/index.ts`](../packages/supramas/tool-supramas-literature/src/index.ts)
+
+### `supramas_literature_search`
+
+Search a structured scholarly index and return bounded opaque candidates without document download URLs.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "query": {
+      "type": "string",
+      "description": "Specific material-science literature query."
+    },
+    "max_results": {
+      "type": "integer",
+      "description": "Requested candidates within the configured tool cap."
+    }
+  },
+  "required": [
+    "query",
+    "max_results"
+  ]
+}
+```
+
+Source: [`packages/supramas/tool-supramas-literature/src/index.ts`](../packages/supramas/tool-supramas-literature/src/index.ts)
+
+### `supramas_paper_import`
+
+Acquire, verify, parse, chunk, and atomically persist one service-issued open-access paper candidate.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "run_id": {
+      "type": "string",
+      "description": "Owning deterministic SupraMAS run id."
+    },
+    "candidate_id": {
+      "type": "string",
+      "description": "Opaque candidate id returned by supramas_literature_search."
+    },
+    "source_type": {
+      "type": "string",
+      "description": "Scientific source classification.",
+      "enum": [
+        "experimental",
+        "review",
+        "theory",
+        "dataset",
+        "unknown"
+      ]
+    }
+  },
+  "required": [
+    "run_id",
+    "candidate_id",
+    "source_type"
+  ]
+}
+```
+
+Source: [`packages/supramas/tool-supramas-literature/src/index.ts`](../packages/supramas/tool-supramas-literature/src/index.ts)
+
+Four bounded tools expose opaque-candidate search, complete paper import, text-free chunk indexes, and paginated evidence reads without document URLs or absolute paths.
 
 <a id="deepseek-aidsh-tool-fs"></a>
 

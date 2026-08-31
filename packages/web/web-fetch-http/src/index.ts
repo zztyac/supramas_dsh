@@ -19,6 +19,16 @@ export {
 } from './provider.ts'
 export type { HttpFetchLimits, HttpFetchResolver } from './provider.ts'
 
+// Stable transport-policy surface for bounded binary providers. Consumers use
+// this package entry instead of reaching through package-private src paths.
+export {
+  publicHttpNetwork,
+  requestPinned,
+  resolvePublicAddresses,
+} from './network.ts'
+export type { PinnedResponse, PublicAddress } from './network.ts'
+export { isSameOrigin, validateFetchUrl, WEB_FETCH_MAX_URL_LENGTH } from './policy.ts'
+
 /** Default `User-Agent`: an explicit product agent, never a browser disguise. */
 export const DEFAULT_USER_AGENT = 'deepseek-harness/0.0.1 (+https://github.com/deepseek-ai)'
 

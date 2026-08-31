@@ -57,6 +57,15 @@ create(request: CreateRunRequest): Promise<RunSnapshot>
 storePaper(id: SupraMasRunIdBrand, metadata: PaperArtifactMetadata): Promise<PaperArtifact>
 
 /**
+ * Validate and persist one paper plus all of its page-aware chunks as one storage mutation.
+ * Any invalid metadata or chunk fails before the durable record and process catalog change.
+ * @param id - Stable owning run identity.
+ * @param request - Complete paper metadata and extracted chunk set.
+ * @returns the detached complete stored artifact.
+ */
+importPaper(id: SupraMasRunIdBrand, request: PaperImportRequest): Promise<PaperArtifact>
+
+/**
  * Add one provenance-bound chunk to a stored paper.
  * @param id - Stable owning run identity.
  * @param paperId - Owning paper identity.
@@ -152,6 +161,25 @@ Workspace-confined writer for the Codex-native Stage 1 file layout.
 
 ```ts cordis-catalog
 /**
+ * Atomically publish one verified source PDF under the canonical run-local raw directory.
+ * The method accepts an owning run id and a filename-safe paper id, never an arbitrary path.
+ * @param id - Owning durable run identity.
+ * @param paperId - Stable filename-safe paper identity.
+ * @param bytes - Complete verified PDF bytes.
+ * @returns the canonical path relative to the configured workspace root.
+ */
+writePaperSource(id: SupraMasRunIdBrand, paperId: string, bytes: Uint8Array): Promise<string>
+
+/**
+ * Resolve the existing canonical source path for an internal parser.
+ * This absolute path is an execution boundary and must never be returned by model-facing tools.
+ * @param id - Owning durable run identity.
+ * @param paperId - Stable filename-safe paper identity.
+ * @returns the canonical absolute source path for internal parser use.
+ */
+async resolvePaperSourcePath(id: SupraMasRunIdBrand, paperId: string): Promise<string>
+
+/**
  * Materialize the current approved task definition.
  * @param id - Owning durable run identity.
  * @returns the canonical relative task path.
@@ -235,4 +263,88 @@ Host service backing the generated `ctx.remote.supramas` namespace.
 ```
 
 Source: [`packages/supramas/api-supramas/src/index.ts`](../../packages/supramas/api-supramas/src/index.ts)
+
+<a id="ctxsupramasliterature--supramasliterature"></a>
+
+### `ctx.supramasLiterature` — `SupraMasLiterature`
+
+Registry and execution owner for structured scholarly-index providers.
+
+```ts cordis-catalog
+/**
+ * Register one provider for the calling fiber and return an eager disposer.
+ * @param provider - Structured scholarly-index provider with a stable id.
+ * @returns a disposer that removes the provider registration.
+ */
+registerIndexProvider(provider: LiteratureIndexProvider): () => void
+
+/**
+ * Register one acquisition provider for the calling fiber.
+ * @param provider - Safe complete-byte acquisition provider with a stable id.
+ * @returns a disposer that removes the provider registration.
+ */
+registerAcquisitionProvider(provider: PaperAcquisitionProvider): () => void
+
+/**
+ * Register one isolated document parser for the calling fiber.
+ * @param provider - Bounded parser provider with a stable id.
+ * @returns a disposer that removes the provider registration.
+ */
+registerParserProvider(provider: DocumentParserProvider): () => void
+
+/**
+ * Search one selected structured index with complete service-owned bounds.
+ * @param request - Normalized query and requested result bound.
+ * @param signal - Optional cancellation signal forwarded to the provider.
+ * @returns bounded, deduplicated candidates with opaque ids.
+ */
+async search(request: LiteratureSearchRequest, signal?: AbortSignal): Promise<LiteratureSearchResult>
+
+/**
+ * Resolve one service-issued opaque id through its owning provider.
+ * @param candidateId - Opaque provider-qualified candidate identity.
+ * @param signal - Optional cancellation signal forwarded to the provider.
+ * @returns the validated candidate and any internal acquisition metadata.
+ */
+async resolve(candidateId: string, signal?: AbortSignal): Promise<ResolvedLiteratureCandidate>
+
+/**
+ * Resolve and acquire one open-access PDF without accepting caller-supplied metadata or URLs.
+ * @param candidateId - Opaque provider-qualified candidate identity.
+ * @param signal - Optional cancellation signal forwarded through acquisition.
+ * @returns complete verified PDF bytes plus safe candidate metadata and digest.
+ */
+async acquire(candidateId: string, signal?: AbortSignal): Promise<AcquiredPaper>
+
+/**
+ * Parse and revalidate one local source through the explicitly selected isolated parser.
+ * @param path - Canonical absolute source path owned by the harness.
+ * @param signal - Optional cancellation signal forwarded to the parser.
+ * @returns normalized page-aware text within configured limits.
+ */
+async parseDocument(path: string, signal?: AbortSignal): Promise<DocumentParseResult>
+```
+
+Source: [`packages/supramas/supramas-literature/src/index.ts`](../../packages/supramas/supramas-literature/src/index.ts)
+
+<a id="ctxsupramaspaperingest--supramaspaperingest"></a>
+
+### `ctx.supramasPaperIngest` — `SupraMasPaperIngest`
+
+Coordinator for acquire -> persist source -> parse -> chunk -> one durable evidence import.
+
+```ts cordis-catalog
+/**
+ * Import one resolved literature candidate into an existing run.
+ * Durable metadata and all chunks commit in one runtime mutation after parsing succeeds.
+ * @param runId - Owning durable SupraMAS run identity.
+ * @param candidateId - Opaque provider-qualified literature candidate identity.
+ * @param sourceType - Scientific provenance classification stored with the paper.
+ * @param signal - Optional cancellation signal forwarded through acquire and parse.
+ * @returns a public-safe summary of the completed durable import.
+ */
+async importCandidate( runId: SupraMasRunIdBrand, candidateId: string, sourceType: SourceType = 'unknown', signal?: AbortSignal, ): Promise<PaperImportSummary>
+```
+
+Source: [`packages/supramas/supramas-paper-ingest/src/index.ts`](../../packages/supramas/supramas-paper-ingest/src/index.ts)
 <!-- END GENERATED cordis-surface -->

@@ -20,6 +20,7 @@ import {
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import SupraMasRuntime from '../../supramas/src/index.ts'
+import SupraMasArtifacts from '../../supramas-artifacts/src/index.ts'
 import * as ToolSupraMas from '../src/index.ts'
 
 async function setup(): Promise<Context> {
@@ -43,6 +44,7 @@ async function setup(): Promise<Context> {
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
   await ctx.plugin(SupraMasRuntime)
+  await ctx.plugin(SupraMasArtifacts, { root })
   await ctx.plugin(ToolSupraMas)
   await ctx.supramas.create({ jobId: 'demo', inputTaskPath: 'runs/demo/input_task.yaml', runDir: 'runs/demo' })
   return ctx
@@ -126,7 +128,7 @@ describe('SupraMAS evidence tools', () => {
     if (artifact.isError) throw new Error('expected artifact read success')
     expect(artifact.value).toMatchObject({
       status: 'success',
-      data: { artifact: { paper_id: 'paper-1', chunks: [{ chunk_id: 'paper-1-p2-performance' }] } },
+      data: { paper: { paper_id: 'paper-1', chunk_count: 1 } },
     })
 
     const verified = await call(ctx, 'supramas_evidence_verify', {
@@ -234,8 +236,7 @@ describe('SupraMAS evidence tools', () => {
     })
     expect(artifact.isError).toBe(false)
     if (artifact.isError) throw new Error('expected artifact success')
-    const storedChunk = (artifact.value as { data: { artifact: { chunks: object[] } } }).data.artifact.chunks[0]
-    expect(storedChunk).not.toHaveProperty('page')
+    expect(JSON.stringify(artifact.value)).not.toContain('The local chunk has no reliable page marker.')
 
     const verified = await call(ctx, 'supramas_evidence_verify', {
       run_id: 'supramas:demo',

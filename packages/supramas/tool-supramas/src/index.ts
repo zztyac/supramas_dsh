@@ -41,7 +41,6 @@ interface ToolEnvelope {
     runs?: RunSnapshot[]
     paper?: PaperSummary
     chunk?: ToolEvidenceChunk
-    artifact?: ToolPaperArtifact
     verification?: EvidenceVerification
     workflow?: Record<string, JsonValue>
     next_action?: Record<string, JsonValue>
@@ -62,10 +61,6 @@ interface ToolEvidenceChunk {
   chunk_id: string
   page?: number
   text: string
-}
-
-interface ToolPaperArtifact extends Omit<PaperArtifact, 'chunks'> {
-  chunks: ToolEvidenceChunk[]
 }
 
 const chunkSchema = {
@@ -130,17 +125,6 @@ const outputSchema = {
         runs: { type: 'array', items: runSchema },
         paper: paperSummarySchema,
         chunk: chunkSchema,
-        artifact: {
-          type: 'object',
-          additionalProperties: false,
-          properties: {
-            paper_id: { type: 'string', required: true },
-            paper_title: { type: 'string', required: true },
-            local_path: { type: 'string', required: true },
-            source_type: { type: 'string', required: true, enum: SOURCE_TYPES },
-            chunks: { type: 'array', required: true, items: chunkSchema },
-          },
-        },
         verification: {
           type: 'object',
           additionalProperties: false,
@@ -284,10 +268,6 @@ function modelChunk(chunk: EvidenceChunk): ToolEvidenceChunk {
     ...(chunk.page === undefined || chunk.page === null ? {} : { page: chunk.page }),
     text: chunk.text,
   }
-}
-
-function modelArtifact(artifact: PaperArtifact): ToolPaperArtifact {
-  return { ...artifact, chunks: artifact.chunks.map(modelChunk) }
 }
 
 function jsonObject(value: object): Record<string, JsonValue> {
@@ -719,7 +699,7 @@ export function apply(ctx: Context): void {
 
   ctx.tools.register(defineTool({
     name: 'supramas_artifact_read',
-    description: 'Read one detached run-local paper artifact and all persisted evidence chunks.',
+    description: 'Read bounded metadata for one run-local paper without returning its full evidence text.',
     parameters: {
       run_id: { type: 'string', required: true, description: 'Owning deterministic SupraMAS run id.' },
       paper_id: { type: 'string', required: true, description: 'Registered paper identity.' },
@@ -737,9 +717,9 @@ export function apply(ctx: Context): void {
         return {
           status: 'success',
           summary: `Loaded local paper ${artifact.paper_id}.`,
-          next_actions: ['verify_candidate_evidence'],
+          next_actions: ['list_or_read_bounded_evidence_chunks'],
           artifacts: [artifact.local_path],
-          data: { artifact: modelArtifact(artifact) },
+          data: { paper: summarizePaper(artifact) },
         }
       })
     },

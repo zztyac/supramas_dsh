@@ -83,9 +83,17 @@ flowchart LR
   pkg_supramas["supramas"]
   svc_supramas["ctx.supramas<br/>Durable material-science task runtime"]
   pkg_supramas_artifacts["supramas-artifacts"]
+  pkg_supramas_paper_ingest["supramas-paper-ingest"]
   pkg_api_supramas["api-supramas"]
   pkg_tool_supramas["tool-supramas"]
+  pkg_tool_supramas_literature["tool-supramas-literature"]
   svc_supramasArtifacts["ctx.supramasArtifacts<br/>Stage 1 compatibility artifact projection"]
+  pkg_supramas_literature["supramas-literature"]
+  svc_supramasLiterature["ctx.supramasLiterature<br/>Bounded scholarly evidence provider seam"]
+  pkg_supramas_literature_openalex["supramas-literature-openalex"]
+  pkg_supramas_paper_http["supramas-paper-http"]
+  pkg_supramas_pdf_pypdf["supramas-pdf-pypdf"]
+  svc_supramasPaperIngest["ctx.supramasPaperIngest<br/>Atomic scholarly evidence import coordinator"]
   svc_supramasController["ctx.supramasController<br/>Host SupraMAS Remote controller"]
   svc_messageFeedback["ctx.messageFeedback<br/>Lifecycle-bound message feedback"]
   svc_workspaceRegistry["ctx.workspaceRegistry<br/>Workspace entity registry"]
@@ -327,6 +335,11 @@ flowchart LR
   pkg_subprocess_local --> svc_subprocess
   pkg_supramas --> svc_supramas
   pkg_supramas_artifacts --> svc_supramasArtifacts
+  pkg_supramas_literature --> svc_supramasLiterature
+  pkg_supramas_literature_openalex --> svc_supramasLiterature
+  pkg_supramas_paper_http --> svc_supramasLiterature
+  pkg_supramas_paper_ingest --> svc_supramasPaperIngest
+  pkg_supramas_pdf_pypdf --> svc_supramasLiterature
   pkg_system_prompt --> svc_systemPrompt
   pkg_terminal --> svc_terminals
   pkg_terminal_bash --> svc_terminals
@@ -442,9 +455,15 @@ flowchart LR
   svc_subprocess --> pkg_terminal_bash
   svc_supramas --> pkg_api_supramas
   svc_supramas --> pkg_supramas_artifacts
+  svc_supramas --> pkg_supramas_paper_ingest
   svc_supramas --> pkg_tool_supramas
+  svc_supramas --> pkg_tool_supramas_literature
   svc_supramasArtifacts --> pkg_api_supramas
+  svc_supramasArtifacts --> pkg_supramas_paper_ingest
   svc_supramasArtifacts --> pkg_tool_supramas
+  svc_supramasLiterature --> pkg_supramas_paper_ingest
+  svc_supramasLiterature --> pkg_tool_supramas_literature
+  svc_supramasPaperIngest --> pkg_tool_supramas_literature
   svc_systemPrompt --> pkg_agent_loop
   svc_systemPrompt --> pkg_tool_fs
   svc_systemPrompt --> pkg_tool_terminal
@@ -504,8 +523,10 @@ flowchart LR
 | `ctx.sessionTelemetry` | `seam` | [`session-telemetry`](../packages/session/session-telemetry) | [`session-telemetry-otel`](../packages/session/session-telemetry-otel) | - | - | 该 seam 捕获会话记录、进行脱敏并交给一个后端；没有其他组件消费该服务，其输出会离开当前进程。 |
 | `ctx.storage` | `seam` | [`storage`](../packages/storage/storage) | [`storage-json`](../packages/storage/storage-json), [`storage-sqlite`](../packages/storage/storage-sqlite) | [`storage-domain`](../packages/storage/storage-domain) | - | 各后端以不同名称并列注册；数据形态（领域优先）挂载到枢纽上，并将类型化操作转换为不透明的 KV 单元原语。 |
 | `ctx.storageDomain` | `core` | [`storage-domain`](../packages/storage/storage-domain) | - | [`workspace`](../packages/workspace/workspace), [`message-feedback`](../packages/feedback/message-feedback) | - | 等待所有已配置后端就绪，然后将领域形态发布为一个受生命周期约束的服务，用于类型化持久状态。 |
-| `ctx.supramas` | `core` | [`supramas`](../packages/supramas/supramas) | - | [`supramas-artifacts`](../packages/supramas/supramas-artifacts), [`api-supramas`](../packages/supramas/api-supramas), [`tool-supramas`](../packages/supramas/tool-supramas) | - | 管理 Stage 1 运行状态、证据目录、角色权限、比较并交换生命周期转换，以及基于领域存储设施的重启恢复。 |
-| `ctx.supramasArtifacts` | `core` | [`supramas-artifacts`](../packages/supramas/supramas-artifacts) | - | [`api-supramas`](../packages/supramas/api-supramas), [`tool-supramas`](../packages/supramas/tool-supramas) | - | 将持久 SupraMAS 状态原子投影为限制在工作区内的任务、证据、重启和最终输出文件，同时不成为第二个工作流权威。 |
+| `ctx.supramas` | `core` | [`supramas`](../packages/supramas/supramas) | - | [`supramas-artifacts`](../packages/supramas/supramas-artifacts), [`supramas-paper-ingest`](../packages/supramas/supramas-paper-ingest), [`api-supramas`](../packages/supramas/api-supramas), [`tool-supramas`](../packages/supramas/tool-supramas), [`tool-supramas-literature`](../packages/supramas/tool-supramas-literature) | - | 管理 Stage 1 运行状态、证据目录、角色权限、比较并交换生命周期转换，以及基于领域存储设施的重启恢复。 |
+| `ctx.supramasArtifacts` | `core` | [`supramas-artifacts`](../packages/supramas/supramas-artifacts) | - | [`supramas-paper-ingest`](../packages/supramas/supramas-paper-ingest), [`api-supramas`](../packages/supramas/api-supramas), [`tool-supramas`](../packages/supramas/tool-supramas) | - | 将持久 SupraMAS 状态原子投影为限制在工作区内的任务、证据、重启和最终输出文件，同时不成为第二个工作流权威。 |
+| `ctx.supramasLiterature` | `seam` | [`supramas-literature`](../packages/supramas/supramas-literature) | [`supramas-literature-openalex`](../packages/supramas/supramas-literature-openalex), [`supramas-paper-http`](../packages/supramas/supramas-paper-http), [`supramas-pdf-pypdf`](../packages/supramas/supramas-pdf-pypdf) | [`supramas-paper-ingest`](../packages/supramas/supramas-paper-ingest), [`tool-supramas-literature`](../packages/supramas/tool-supramas-literature) | - | 负责显式提供器选择、不透明候选身份、完整 PDF 校验、有界解析校验和确定性的页面感知分块。 |
+| `ctx.supramasPaperIngest` | `core` | [`supramas-paper-ingest`](../packages/supramas/supramas-paper-ingest) | - | [`tool-supramas-literature`](../packages/supramas/tool-supramas-literature) | - | 协调获取、源文件原子持久化、隔离解析、确定性分块和一次全有或全无的持久证据导入。 |
 | `ctx.supramasController` | `core` | [`api-supramas`](../packages/supramas/api-supramas) | - | - | - | 把安全且版本化的材料任务视图与生命周期命令投影到面向浏览器客户端的 Host Remote namespace。 |
 | `ctx.messageFeedback` | `core` | [`message-feedback`](../packages/feedback/message-feedback) | - | - | - | 拥有本地逐 assistant 消息反馈、生命周期与目标校验、逐条目 compare-and-set 及 Host 一元 Remote 契约，且不进入 Session 历史或遥测。 |
 | `ctx.workspaceRegistry` | `core` | [`workspace`](../packages/workspace/workspace) | - | [`api-workspace-controller`](../packages/api/workspace-controller), [`api-session-controller`](../packages/api/session-controller) | - | 通过领域设施拥有带 WorkspaceId 品牌类型的记录；稳定的 sessionIds 账户驱动 Host RPC 与 GUI 投影。 |

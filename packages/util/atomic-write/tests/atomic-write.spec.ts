@@ -2,7 +2,7 @@ import { lstat, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile 
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { withFileLock, writeFileAtomic } from '../src/index.ts'
+import { withFileLock, writeBytesAtomic, writeFileAtomic } from '../src/index.ts'
 
 const state = vi.hoisted(() => ({ failLockCreateWithEPERM: false }))
 
@@ -76,6 +76,17 @@ describe('writeFileAtomic', () => {
     await mkdir(target)
     await expect(writeFileAtomic(target, 'content', { mode: 0o600 })).rejects.toThrow()
     expect((await readdir(dir)).filter(entry => entry.includes('.tmp'))).toEqual([])
+  })
+})
+
+describe('writeBytesAtomic', () => {
+  it('publishes exact binary bytes through the same sibling-rename protocol', async () => {
+    const dir = await scratch()
+    const target = join(dir, 'papers', 'source.pdf')
+    const bytes = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x00, 0xff])
+    await writeBytesAtomic(target, bytes, { mode: 0o600, dirMode: 0o700 })
+    expect(new Uint8Array(await readFile(target))).toEqual(bytes)
+    expect((await readdir(join(dir, 'papers'))).filter(entry => entry.endsWith('.tmp'))).toEqual([])
   })
 })
 

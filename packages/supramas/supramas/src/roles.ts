@@ -44,13 +44,20 @@ export const ROLE_SPECS: readonly RoleSpec[] = [
   {
     id: 'strategy-builder',
     purpose: 'Find, verify, persist, and extract one paper candidate.',
-    tools: ['skill', 'web_search', 'web_fetch', 'supramas_paper_store', 'supramas_chunk_extract'],
+    tools: [
+      'skill',
+      'web_search',
+      'supramas_literature_search',
+      'supramas_paper_import',
+      'supramas_chunk_list',
+      'supramas_chunk_read',
+    ],
     outputSchema: 'supramas.builder.v1',
   },
   {
     id: 'strategy-reviewer',
     purpose: 'Review one candidate and its local evidence without mutating it.',
-    tools: ['supramas_artifact_read', 'supramas_evidence_verify'],
+    tools: ['supramas_chunk_list', 'supramas_chunk_read', 'supramas_evidence_verify'],
     outputSchema: 'supramas.reviewer.v1',
   },
 ] as const

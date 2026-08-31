@@ -45,13 +45,15 @@ describe('SupraMAS role contracts', () => {
     expect(builder.tools).toEqual([
       'skill',
       'web_search',
-      'web_fetch',
-      'supramas_paper_store',
-      'supramas_chunk_extract',
+      'supramas_literature_search',
+      'supramas_paper_import',
+      'supramas_chunk_list',
+      'supramas_chunk_read',
     ])
     expect(builder.tools).not.toContain('supramas_review_record')
     expect(reviewer.tools).toEqual([
-      'supramas_artifact_read',
+      'supramas_chunk_list',
+      'supramas_chunk_read',
       'supramas_evidence_verify',
     ])
   })

@@ -67,6 +67,7 @@
   },
   "dependencies": {
     "@deepseek-ai/dsh-tool-supramas": "workspace:^",
+    "@deepseek-ai/dsh-tool-supramas-literature": "workspace:^",
     "js-yaml": "^4.1.0",
     "@deepseek-ai/schemastery": "workspace:^",
     "zod": "^4.4.3"

@@ -21,6 +21,9 @@
 - id: tool-supramas
   name: '@deepseek-ai/dsh-tool-supramas'
 
+- id: tool-supramas-literature
+  name: '@deepseek-ai/dsh-tool-supramas-literature'
+
 - id: tool-ask-user
   name: '@deepseek-ai/dsh-tool-ask-user'
 
@@ -48,9 +51,9 @@
     persona: |-
       You are the SupraMAS Stage 1 strategy builder. Execute exactly one bounded
       build_root, build_child, or revise_candidate task from the coordinator.
-      Search literature with skill, web_search, and web_fetch as useful. Before
-      returning a selected paper, persist its verified metadata and evidence
-      chunks with supramas_paper_store and supramas_chunk_extract. Never review,
+      Search literature with skill, web_search, and supramas_literature_search.
+      Import a selected opaque candidate only through supramas_paper_import, then
+      inspect bounded evidence with supramas_chunk_list and supramas_chunk_read. Never review,
       accept, or assemble a tree. Return JSON only with paper_node, edge, optional
       reason, and notes. Use null paper_node when no supported candidate exists;
       use null edge for a root or when no supported child bridge exists. Do not
@@ -59,9 +62,10 @@
       allow:
         - skill
         - web_search
-        - web_fetch
-        - supramas_paper_store
-        - supramas_chunk_extract
+        - supramas_literature_search
+        - supramas_paper_import
+        - supramas_chunk_list
+        - supramas_chunk_read
 
 - id: tool-subagent-reviewer
   name: '@deepseek-ai/dsh-tool-subagent'
@@ -75,12 +79,14 @@
     persona: |-
       You are the SupraMAS Stage 1 evidence reviewer. Review exactly one pending
       paper candidate and proposed edge. Read the local artifact and verify every
-      cited quote with supramas_artifact_read and supramas_evidence_verify. Never
+      cited quote with supramas_chunk_list, supramas_chunk_read, and
+      supramas_evidence_verify. Never
       mutate evidence, submit workflow state, search for replacement papers, or
       assemble a tree. Return JSON only with decision (accept, revise, or reject),
       summary, critical_issues, edge_issues, and acceptance_conditions. Accept
       only when the local evidence and parent-limitation bridge are supported.
     toolFilter:
       allow:
-        - supramas_artifact_read
+        - supramas_chunk_list
+        - supramas_chunk_read
         - supramas_evidence_verify

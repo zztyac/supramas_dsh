@@ -34,8 +34,20 @@
             name: '@deepseek-ai/dsh-supramas-artifacts'
             config:
               root: !!js process.cwd()
+          - id: supramas-literature
+            name: '@deepseek-ai/dsh-supramas-literature'
+          - id: supramas-literature-openalex
+            name: '@deepseek-ai/dsh-supramas-literature-openalex'
+          - id: supramas-paper-http
+            name: '@deepseek-ai/dsh-supramas-paper-http'
+          - id: supramas-pdf-pypdf
+            name: '@deepseek-ai/dsh-supramas-pdf-pypdf'
+          - id: supramas-paper-ingest
+            name: '@deepseek-ai/dsh-supramas-paper-ingest'
           - id: tool-supramas
             name: '@deepseek-ai/dsh-tool-supramas'
+          - id: tool-supramas-literature
+            name: '@deepseek-ai/dsh-tool-supramas-literature'
           - id: tool-subagent-builder
             name: '@deepseek-ai/dsh-tool-subagent'
             config:
@@ -47,8 +59,12 @@
               persona: 'You are the SupraMAS Stage 1 strategy builder. Return the requested JSON handoff only.'
               toolFilter:
                 allow:
-                  - supramas_paper_store
-                  - supramas_chunk_extract
+                  - skill
+                  - web_search
+                  - supramas_literature_search
+                  - supramas_paper_import
+                  - supramas_chunk_list
+                  - supramas_chunk_read
           - id: tool-subagent-reviewer
             name: '@deepseek-ai/dsh-tool-subagent'
             config:
@@ -60,5 +76,6 @@
               persona: 'You are the SupraMAS Stage 1 evidence reviewer. Return the requested JSON decision only.'
               toolFilter:
                 allow:
-                  - supramas_artifact_read
+                  - supramas_chunk_list
+                  - supramas_chunk_read
                   - supramas_evidence_verify

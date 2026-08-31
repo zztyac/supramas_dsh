@@ -46,7 +46,11 @@ export interface WriteFileAtomicOptions {
  * @param content - complete next file content.
  * @param options - permission bits for the replacement inode.
  */
-export async function writeFileAtomic(filename: string, content: string, options: WriteFileAtomicOptions): Promise<void> {
+async function writeAtomic(
+  filename: string,
+  content: string | Uint8Array,
+  options: WriteFileAtomicOptions,
+): Promise<void> {
   await mkdir(dirname(filename), {
     recursive: true,
     ...options.dirMode === undefined ? {} : { mode: options.dirMode },
@@ -61,6 +65,31 @@ export async function writeFileAtomic(filename: string, content: string, options
     await rm(temp, { force: true })
     throw error
   }
+}
+
+/**
+ * Atomically replace one UTF-8 text file through the shared exclusive sibling protocol.
+ * @param filename - Final path receiving the complete text.
+ * @param content - Complete next UTF-8 text content.
+ * @param options - Permission bits for the replacement inode and new directories.
+ */
+export async function writeFileAtomic(filename: string, content: string, options: WriteFileAtomicOptions): Promise<void> {
+  await writeAtomic(filename, content, options)
+}
+
+/**
+ * Binary counterpart to {@link writeFileAtomic}; publishes exact bytes through
+ * the same exclusive sibling-create and atomic-rename protocol.
+ * @param filename - final path receiving the complete bytes.
+ * @param content - complete next binary content.
+ * @param options - permission bits for the replacement inode.
+ */
+export async function writeBytesAtomic(
+  filename: string,
+  content: Uint8Array,
+  options: WriteFileAtomicOptions,
+): Promise<void> {
+  await writeAtomic(filename, content, options)
 }
 
 /** Whether an exclusive create found an existing lock. */

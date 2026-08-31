@@ -25,8 +25,14 @@ describe('dsh-supramas bundle', () => {
         name: '@deepseek-ai/dsh-supramas-artifacts',
         config: { root: { __jsExpr: 'process.cwd()' } },
       },
+      { id: 'supramas-literature', name: '@deepseek-ai/dsh-supramas-literature' },
+      { id: 'supramas-literature-openalex', name: '@deepseek-ai/dsh-supramas-literature-openalex' },
+      { id: 'supramas-paper-http', name: '@deepseek-ai/dsh-supramas-paper-http' },
+      { id: 'supramas-pdf-pypdf', name: '@deepseek-ai/dsh-supramas-pdf-pypdf' },
+      { id: 'supramas-paper-ingest', name: '@deepseek-ai/dsh-supramas-paper-ingest' },
       { id: 'api-supramas', name: '@deepseek-ai/dsh-api-supramas' },
       { id: 'tool-supramas', name: '@deepseek-ai/dsh-tool-supramas' },
+      { id: 'tool-supramas-literature', name: '@deepseek-ai/dsh-tool-supramas-literature' },
       { id: 'client-ui-supramas', name: '@deepseek-ai/dsh-client-ui-supramas' },
     ])
     expect(manifest.dependencies).toMatchObject({
@@ -34,7 +40,14 @@ describe('dsh-supramas bundle', () => {
       '@deepseek-ai/dsh-client-ui-supramas': 'workspace:^',
       '@deepseek-ai/dsh-supramas': 'workspace:^',
       '@deepseek-ai/dsh-supramas-artifacts': 'workspace:^',
+      '@deepseek-ai/dsh-supramas-literature': 'workspace:^',
+      '@deepseek-ai/dsh-supramas-literature-openalex': 'workspace:^',
+      '@deepseek-ai/dsh-supramas-paper-http': 'workspace:^',
+      '@deepseek-ai/dsh-supramas-paper-ingest': 'workspace:^',
+      '@deepseek-ai/dsh-supramas-pdf-pypdf': 'workspace:^',
       '@deepseek-ai/dsh-tool-supramas': 'workspace:^',
+      '@deepseek-ai/dsh-tool-supramas-literature': 'workspace:^',
+      '@deepseek-ai/dsh-web-fetch-http': 'workspace:^',
     })
   })
 
@@ -46,6 +59,7 @@ describe('dsh-supramas bundle', () => {
     }) as { id?: string; name?: string; config?: Record<string, unknown> }[]
     expect(entries.find(entry => entry.id === 'persona')).toMatchObject({ name: '@deepseek-ai/dsh-persona' })
     expect(entries.find(entry => entry.id === 'tool-supramas')).toMatchObject({ name: '@deepseek-ai/dsh-tool-supramas' })
+    expect(entries.find(entry => entry.id === 'tool-supramas-literature')).toMatchObject({ name: '@deepseek-ai/dsh-tool-supramas-literature' })
     expect(entries.find(entry => entry.id === 'tool-web')).toMatchObject({ name: '@deepseek-ai/dsh-tool-web' })
     const builder = entries.find(entry => entry.id === 'tool-subagent-builder')
     expect(builder).toMatchObject({ name: '@deepseek-ai/dsh-tool-subagent' })
@@ -54,5 +68,10 @@ describe('dsh-supramas bundle', () => {
     expect(reviewer).toMatchObject({ name: '@deepseek-ai/dsh-tool-subagent' })
     expect(reviewer?.config).toMatchObject({ toolName: 'supramas_reviewer', enableRunInBackground: false })
     expect(entries.find(entry => entry.id === 'tool-subagent')).toBeUndefined()
+    expect((builder?.config as { toolFilter?: { allow?: string[] } }).toolFilter?.allow).toContain('supramas_paper_import')
+    expect((builder?.config as { toolFilter?: { allow?: string[] } }).toolFilter?.allow).not.toContain('supramas_paper_store')
+    expect((reviewer?.config as { toolFilter?: { allow?: string[] } }).toolFilter?.allow).toEqual([
+      'supramas_chunk_list', 'supramas_chunk_read', 'supramas_evidence_verify',
+    ])
   })
 })
