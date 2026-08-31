@@ -13,7 +13,7 @@ import {
   type PaperNode,
   type Stage1Workflow,
 } from '@deepseek-ai/dsh-supramas-domain'
-import { access } from 'node:fs/promises'
+import { access, open } from 'node:fs/promises'
 import { isAbsolute, relative, resolve, sep } from 'node:path'
 
 /** Plugin configuration for one workspace-confined compatibility export root. */
@@ -36,10 +36,20 @@ export interface Stage1ArtifactManifest {
   files: string[]
 }
 
+/** Closed canonical final-output names in stable presentation order. */
+export const STAGE1_OUTPUT_NAMES = [
+  'strategy_tree.json',
+  'node_review_log.jsonl',
+  'review_report.md',
+] as const
+
+/** One canonical Stage 1 output basename. */
+export type Stage1OutputName = typeof STAGE1_OUTPUT_NAMES[number]
+
 /** Public-safe readiness of one canonical final output. */
 export interface Stage1OutputStatus {
   /** Stable basename safe to show in browser clients. */
-  name: 'strategy_tree.json' | 'node_review_log.jsonl' | 'review_report.md'
+  name: Stage1OutputName
   /** Whether the file currently exists below the configured workspace root. */
   ready: boolean
 }
@@ -54,6 +64,7 @@ const DEFAULT_EVIDENCE_POLICY =
   'Use literature search to find papers, persist selected paper evidence locally, and use no placeholder papers.'
 const DEFAULT_EXCLUDE = ['Stage 2 idea generation', 'abstract-only evidence']
 const SAFE_PAPER_FILE_ID = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/
+const MAX_OUTPUT_READ_BYTES = 16 * 1024 * 1024
 
 /**
  * Resolve artifact writer configuration before any filesystem operation.
@@ -287,12 +298,7 @@ export class SupraMasArtifacts extends Service {
   async outputStatus(id: SupraMasRunIdBrand): Promise<Stage1OutputStatus[]> {
     const run = this.ctx.supramas.get(id)
     if (run === undefined) throw new Error(`supramas-artifacts: run ${id} was not found`)
-    const names: Stage1OutputStatus['name'][] = [
-      'strategy_tree.json',
-      'node_review_log.jsonl',
-      'review_report.md',
-    ]
-    return Promise.all(names.map(async (name) => {
+    return Promise.all(STAGE1_OUTPUT_NAMES.map(async (name) => {
       try {
         await access(this.absolute(`runs/${run.jobId}/outputs/${name}`))
         return { name, ready: true }
@@ -300,6 +306,50 @@ export class SupraMasArtifacts extends Service {
         return { name, ready: false }
       }
     }))
+  }
+
+  /**
+   * Read one canonical completed output through a caller-supplied complete byte bound.
+   * The fixed output-name vocabulary prevents this method from becoming a filesystem read primitive.
+   * @param id - Owning durable run identity.
+   * @param name - One closed canonical output basename.
+   * @param maxBytes - Maximum complete payload size, capped again by the service.
+   * @returns detached exact output bytes.
+   */
+  async readOutput(id: SupraMasRunIdBrand, name: Stage1OutputName, maxBytes: number): Promise<Uint8Array> {
+    const run = this.ctx.supramas.get(id)
+    if (run === undefined) throw new Error(`supramas-artifacts: run ${id} was not found`)
+    if (!STAGE1_OUTPUT_NAMES.includes(name)) {
+      throw new Error('supramas-artifacts: name must be a canonical output name')
+    }
+    if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) {
+      throw new Error('supramas-artifacts: maxBytes must be a positive safe integer')
+    }
+    if (maxBytes > MAX_OUTPUT_READ_BYTES) {
+      throw new Error(`supramas-artifacts: maxBytes exceeds service limit ${MAX_OUTPUT_READ_BYTES}`)
+    }
+
+    const handle = await open(this.absolute(`runs/${run.jobId}/outputs/${name}`), 'r')
+    try {
+      const stats = await handle.stat()
+      if (!stats.isFile()) throw new Error(`supramas-artifacts: output ${name} is not a file`)
+      if (stats.size > maxBytes) {
+        throw new Error(`supramas-artifacts: output ${name} exceeds ${maxBytes} byte read limit`)
+      }
+      const buffer = new Uint8Array(maxBytes + 1)
+      let total = 0
+      while (total < buffer.byteLength) {
+        const { bytesRead } = await handle.read(buffer, total, buffer.byteLength - total, total)
+        if (bytesRead === 0) break
+        total += bytesRead
+      }
+      if (total > maxBytes) {
+        throw new Error(`supramas-artifacts: output ${name} exceeds ${maxBytes} byte read limit`)
+      }
+      return buffer.slice(0, total)
+    } finally {
+      await handle.close()
+    }
   }
 
   /**

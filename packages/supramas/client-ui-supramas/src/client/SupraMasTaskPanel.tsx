@@ -12,17 +12,35 @@ import {
   IconRefreshOutline16,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type {
+  SupraMasArtifactsViewV1,
   SupraMasCreateStage1RequestV1,
+  SupraMasEvidenceSliceViewV1,
+  SupraMasOutputNameV1,
+  SupraMasPaperEvidenceViewV1,
   SupraMasRunViewV1,
+  SupraMasStrategyTreeViewV1,
 } from '@deepseek-ai/dsh-api-supramas/types'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import { NS, type SupraMasKey } from './locales.ts'
+import { SupraMasTaskWorkspace } from './SupraMasTaskWorkspace.tsx'
 import css from './SupraMasTaskPanel.module.css'
 
 /** UI-to-data seam; the component never reaches a Remote or Session directly. */
 export interface SupraMasUiPort {
   readonly list: () => Promise<readonly SupraMasRunViewV1[]>
+  readonly get: (runId: string) => Promise<SupraMasRunViewV1>
+  readonly tree: (runId: string) => Promise<SupraMasStrategyTreeViewV1>
+  readonly paper: (runId: string, paperId: string) => Promise<SupraMasPaperEvidenceViewV1>
+  readonly evidence: (
+    runId: string,
+    paperId: string,
+    chunkId: string,
+    start: number,
+    maxCharacters: number,
+  ) => Promise<SupraMasEvidenceSliceViewV1>
+  readonly artifacts: (runId: string) => Promise<SupraMasArtifactsViewV1>
+  readonly downloadArtifact: (runId: string, name: SupraMasOutputNameV1) => Promise<void>
   readonly createAndQueue: (request: SupraMasCreateStage1RequestV1) => Promise<{
     readonly view: SupraMasRunViewV1
     readonly queued: boolean
@@ -75,6 +93,7 @@ function replaceTask(
 export function SupraMasTaskPanel({ wide, api, t }: SupraMasTaskPanelProps) {
   const [open, setOpen] = useState(false)
   const [tasks, setTasks] = useState<readonly SupraMasRunViewV1[]>([])
+  const [selectedRunId, setSelectedRunId] = useState<string>()
   const [loading, setLoading] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
@@ -86,15 +105,17 @@ export function SupraMasTaskPanel({ wide, api, t }: SupraMasTaskPanelProps) {
   const triggerRef = useRef<HTMLButtonElement>(null)
   const closeRef = useRef<HTMLButtonElement>(null)
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    setError(undefined)
+  const load = useCallback(async (silent = false) => {
+    if (!silent) {
+      setLoading(true)
+      setError(undefined)
+    }
     try {
       setTasks(await api.list())
     } catch (loadError: unknown) {
-      setError(messageOf(loadError, t('error.generic')))
+      if (!silent) setError(messageOf(loadError, t('error.generic')))
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }, [api, t])
 
@@ -106,8 +127,16 @@ export function SupraMasTaskPanel({ wide, api, t }: SupraMasTaskPanelProps) {
 
   const close = useCallback(() => {
     setOpen(false)
+    setSelectedRunId(undefined)
     triggerRef.current?.focus()
   }, [])
+
+  useEffect(() => {
+    if (!open || selectedRunId !== undefined || !tasks.some(task =>
+      !['completed', 'failed', 'cancelled'].includes(task.run.phase))) return
+    const timer = window.setInterval(() => { void load(true) }, 3_000)
+    return () => { window.clearInterval(timer) }
+  }, [load, open, selectedRunId, tasks])
 
   useEffect(() => {
     if (!open) return
@@ -174,6 +203,12 @@ export function SupraMasTaskPanel({ wide, api, t }: SupraMasTaskPanelProps) {
     })
   }
 
+  const updateTask = useCallback((updated: SupraMasRunViewV1) => {
+    setTasks(current => replaceTask(current, updated))
+  }, [])
+
+  const selectedTask = tasks.find(task => task.run.id === selectedRunId)
+
   return (
     <>
       <button
@@ -207,109 +242,124 @@ export function SupraMasTaskPanel({ wide, api, t }: SupraMasTaskPanelProps) {
               </div>
             </header>
 
-            <div className={css.content}>
-              <form className={css.form} onSubmit={create}>
-                <h3>{t('form.title')}</h3>
-                <label>
-                  <span>{t('form.topic')}</span>
-                  <textarea
-                    value={topic}
-                    placeholder={t('form.topicPlaceholder')}
-                    rows={3}
-                    onChange={(event) => { setTopic(event.target.value) }}
-                  />
-                </label>
-                <div className={css.formGrid}>
+            {selectedTask === undefined ? (
+              <div className={css.content}>
+                <form className={css.form} onSubmit={create}>
+                  <h3>{t('form.title')}</h3>
                   <label>
-                    <span>{t('form.materials')}</span>
-                    <input
-                      value={materials}
-                      placeholder={t('form.materialsPlaceholder')}
-                      onChange={(event) => { setMaterials(event.target.value) }}
+                    <span>{t('form.topic')}</span>
+                    <textarea
+                      value={topic}
+                      placeholder={t('form.topicPlaceholder')}
+                      rows={3}
+                      onChange={(event) => { setTopic(event.target.value) }}
                     />
                   </label>
-                  <label>
-                    <span>{t('form.properties')}</span>
-                    <input
-                      value={properties}
-                      placeholder={t('form.propertiesPlaceholder')}
-                      onChange={(event) => { setProperties(event.target.value) }}
-                    />
-                  </label>
-                </div>
-                <div className={css.formFooter}>
-                  <label>
-                    <span>{t('form.depth')}</span>
-                    <select value={depth} onChange={(event) => { setDepth(Number(event.target.value)) }}>
-                      {[0, 1, 2, 3].map(value => (
-                        <option key={value} value={value}>{t(`form.depth.${value}` as SupraMasKey)}</option>
-                      ))}
-                    </select>
-                  </label>
-                  <button className={css.primary} type="submit" disabled={busy || topic.trim().length === 0}>
-                    <IconPlayOutline16 size={16} />
-                    {t('action.create')}
-                  </button>
-                </div>
-              </form>
-
-              <section className={css.tasks}>
-                <div className={css.tasksHeader}>
-                  <h3>{t('tasks.title')}</h3>
-                  <span>{tasks.length}</span>
-                </div>
-                {error !== undefined && (
-                  <div className={css.error} role="alert">
-                    <span>{error}</span>
-                    <button type="button" onClick={() => { void load() }}>{t('action.retry')}</button>
+                  <div className={css.formGrid}>
+                    <label>
+                      <span>{t('form.materials')}</span>
+                      <input
+                        value={materials}
+                        placeholder={t('form.materialsPlaceholder')}
+                        onChange={(event) => { setMaterials(event.target.value) }}
+                      />
+                    </label>
+                    <label>
+                      <span>{t('form.properties')}</span>
+                      <input
+                        value={properties}
+                        placeholder={t('form.propertiesPlaceholder')}
+                        onChange={(event) => { setProperties(event.target.value) }}
+                      />
+                    </label>
                   </div>
-                )}
-                {notice !== undefined && <p className={css.notice} role="status">{notice}</p>}
-                {loading && <p className={css.empty}>{t('tasks.loading')}</p>}
-                {!loading && error === undefined && tasks.length === 0 && <p className={css.empty}>{t('tasks.empty')}</p>}
-                <div className={css.taskList}>
-                  {tasks.map((task) => {
-                    const next = nextKey(task)
-                    const progress = task.stage1?.progress
-                    const canCancel = !['completed', 'failed', 'cancelled'].includes(task.run.phase)
-                    return (
-                      <article key={task.run.id} className={css.task} aria-label={task.stage1?.researchTopic ?? task.run.jobId}>
-                        <div className={css.taskTop}>
-                          <div>
-                            <h4>{task.stage1?.researchTopic ?? task.run.jobId}</h4>
-                            {next !== undefined && <p>{t(next)}</p>}
+                  <div className={css.formFooter}>
+                    <label>
+                      <span>{t('form.depth')}</span>
+                      <select value={depth} onChange={(event) => { setDepth(Number(event.target.value)) }}>
+                        {[0, 1, 2, 3].map(value => (
+                          <option key={value} value={value}>{t(`form.depth.${value}` as SupraMasKey)}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <button className={css.primary} type="submit" disabled={busy || topic.trim().length === 0}>
+                      <IconPlayOutline16 size={16} />
+                      {t('action.create')}
+                    </button>
+                  </div>
+                </form>
+
+                <section className={css.tasks}>
+                  <div className={css.tasksHeader}>
+                    <h3>{t('tasks.title')}</h3>
+                    <span>{tasks.length}</span>
+                  </div>
+                  {error !== undefined && (
+                    <div className={css.error} role="alert">
+                      <span>{error}</span>
+                      <button type="button" onClick={() => { void load() }}>{t('action.retry')}</button>
+                    </div>
+                  )}
+                  {notice !== undefined && <p className={css.notice} role="status">{notice}</p>}
+                  {loading && <p className={css.empty}>{t('tasks.loading')}</p>}
+                  {!loading && error === undefined && tasks.length === 0 && <p className={css.empty}>{t('tasks.empty')}</p>}
+                  <div className={css.taskList}>
+                    {tasks.map((task) => {
+                      const next = nextKey(task)
+                      const progress = task.stage1?.progress
+                      const canCancel = !['completed', 'failed', 'cancelled'].includes(task.run.phase)
+                      return (
+                        <article key={task.run.id} className={css.task} aria-label={task.stage1?.researchTopic ?? task.run.jobId}>
+                          <div className={css.taskTop}>
+                            <div>
+                              <h4>{task.stage1?.researchTopic ?? task.run.jobId}</h4>
+                              {next !== undefined && <p>{t(next)}</p>}
+                            </div>
+                            <span className={css.status} data-phase={task.run.phase}>{t(statusKey(task.run.phase))}</span>
                           </div>
-                          <span className={css.status} data-phase={task.run.phase}>{t(statusKey(task.run.phase))}</span>
-                        </div>
-                        {progress !== undefined && (
-                          <div className={css.metrics}>
-                            <span>{t('progress.papers', { count: progress.acceptedPapers })}</span>
-                            <span>{t('progress.links', { count: progress.strategyLinks })}</span>
-                            <span>{t('progress.limitations', { count: progress.openLimitations })}</span>
-                            <span>{t('progress.attempts', { count: progress.builderAttempts })}</span>
-                            <span>{t('progress.reviews', { count: progress.reviews })}</span>
+                          {progress !== undefined && (
+                            <div className={css.metrics}>
+                              <span>{t('progress.papers', { count: progress.acceptedPapers })}</span>
+                              <span>{t('progress.links', { count: progress.strategyLinks })}</span>
+                              <span>{t('progress.limitations', { count: progress.openLimitations })}</span>
+                              <span>{t('progress.attempts', { count: progress.builderAttempts })}</span>
+                              <span>{t('progress.reviews', { count: progress.reviews })}</span>
+                            </div>
+                          )}
+                          {task.run.failure !== undefined && <p className={css.failure}>{task.run.failure.message}</p>}
+                          <div className={css.taskActions}>
+                            {task.stage1 !== undefined && (
+                              <button type="button" disabled={busy} onClick={() => { setSelectedRunId(task.run.id) }}>
+                                {t('action.details')}
+                              </button>
+                            )}
+                            {task.run.phase === 'recoverable_failed' && (
+                              <button type="button" disabled={busy} onClick={() => { resume(task) }}>{t('action.resume')}</button>
+                            )}
+                            {task.run.phase === 'running' && (
+                              <button type="button" disabled={busy} onClick={() => { queue(task) }}>{t('action.execute')}</button>
+                            )}
+                            {canCancel && (
+                              <button type="button" className={css.danger} disabled={busy} onClick={() => { cancel(task) }}>
+                                {t('action.cancel')}
+                              </button>
+                            )}
                           </div>
-                        )}
-                        {task.run.failure !== undefined && <p className={css.failure}>{task.run.failure.message}</p>}
-                        <div className={css.taskActions}>
-                          {task.run.phase === 'recoverable_failed' && (
-                            <button type="button" disabled={busy} onClick={() => { resume(task) }}>{t('action.resume')}</button>
-                          )}
-                          {task.run.phase === 'running' && (
-                            <button type="button" disabled={busy} onClick={() => { queue(task) }}>{t('action.execute')}</button>
-                          )}
-                          {canCancel && (
-                            <button type="button" className={css.danger} disabled={busy} onClick={() => { cancel(task) }}>
-                              {t('action.cancel')}
-                            </button>
-                          )}
-                        </div>
-                      </article>
-                    )
-                  })}
-                </div>
-              </section>
-            </div>
+                        </article>
+                      )
+                    })}
+                  </div>
+                </section>
+              </div>
+            ) : (
+              <SupraMasTaskWorkspace
+                initial={selectedTask}
+                api={api}
+                t={t}
+                onBack={() => { setSelectedRunId(undefined) }}
+                onViewUpdate={updateTask}
+              />
+            )}
           </section>
         </div>
       )}

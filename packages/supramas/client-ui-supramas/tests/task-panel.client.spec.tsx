@@ -2,7 +2,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
-import type { SupraMasRunViewV1 } from '@deepseek-ai/dsh-api-supramas/types'
+import type {
+  SupraMasArtifactsViewV1,
+  SupraMasEvidenceSliceViewV1,
+  SupraMasPaperEvidenceViewV1,
+  SupraMasRunViewV1,
+  SupraMasStrategyTreeViewV1,
+} from '@deepseek-ai/dsh-api-supramas/types'
 import {
   SupraMasTaskPanel,
   type SupraMasTaskPanelProps,
@@ -13,6 +19,7 @@ import { zh } from '../src/client/locales.ts'
 afterEach(() => {
   cleanup()
   vi.restoreAllMocks()
+  vi.unstubAllGlobals()
 })
 
 const running: SupraMasRunViewV1 = {
@@ -48,9 +55,100 @@ const running: SupraMasRunViewV1 = {
   },
 }
 
+const completed: SupraMasRunViewV1 = {
+  ...running,
+  run: { ...running.run, phase: 'completed', revision: 8, updatedAt: 8 },
+  stage1: {
+    ...running.stage1!,
+    status: 'completed',
+    progress: {
+      acceptedPapers: 1,
+      strategyLinks: 0,
+      openLimitations: 0,
+      builderAttempts: 1,
+      reviews: 1,
+    },
+    nextAction: { kind: 'completed' },
+  },
+}
+
+const tree: SupraMasStrategyTreeViewV1 = {
+  apiVersion: 1,
+  runId: completed.run.id,
+  revision: completed.run.revision,
+  status: 'completed',
+  nodes: [{
+    nodeId: 'N0',
+    level: 0,
+    parentId: null,
+    paperId: 'paper-1',
+    paperTitle: 'BZO pinning paper',
+    year: 2024,
+    doi: '10.0000/bzo-demo',
+    url: 'https://example.invalid/paper-1',
+    sourceType: 'experimental',
+    notes: [],
+    strategyRecords: [{
+      recordId: 'R1',
+      tuningDimension: 'Composition tuning',
+      tuningStrategy: 'Add BZO artificial pinning centers.',
+      tuningEffect: 'BZO additions improve in-field Jc.',
+      evidence: { chunkId: 'paper-1-c1', page: 7, evidenceText: 'BZO additions improve in-field Jc' },
+      confidence: 0.9,
+    }],
+    limitationRecords: [{
+      limitationId: 'L1',
+      limitation: 'Only one loading was measured.',
+      expectation: 'Compare multiple BZO loadings.',
+      relatedRecordIds: ['R1'],
+      evidence: { chunkId: 'paper-1-c1', page: 7, evidenceText: 'only one loading was measured' },
+      confidence: 0.8,
+    }],
+  }],
+  edges: [],
+}
+
+const paper: SupraMasPaperEvidenceViewV1 = {
+  apiVersion: 1,
+  runId: completed.run.id,
+  paperId: 'paper-1',
+  paperTitle: 'BZO pinning paper',
+  sourceType: 'experimental',
+  chunks: [{ chunkId: 'paper-1-c1', page: 7, characters: 68 }],
+}
+
+const evidence: SupraMasEvidenceSliceViewV1 = {
+  apiVersion: 1,
+  runId: completed.run.id,
+  paperId: 'paper-1',
+  chunkId: 'paper-1-c1',
+  page: 7,
+  start: 0,
+  end: 68,
+  totalCharacters: 68,
+  text: 'BZO additions improve in-field Jc, but only one loading was measured.',
+}
+
+const artifacts: SupraMasArtifactsViewV1 = {
+  apiVersion: 1,
+  runId: completed.run.id,
+  ready: true,
+  files: [
+    { name: 'strategy_tree.json', ready: true },
+    { name: 'node_review_log.jsonl', ready: true },
+    { name: 'review_report.md', ready: true },
+  ],
+}
+
 function port(overrides: Partial<SupraMasUiPort> = {}): SupraMasUiPort {
   return {
     list: vi.fn().mockResolvedValue([]),
+    get: vi.fn().mockResolvedValue(completed),
+    tree: vi.fn().mockResolvedValue(tree),
+    paper: vi.fn().mockResolvedValue(paper),
+    evidence: vi.fn().mockResolvedValue(evidence),
+    artifacts: vi.fn().mockResolvedValue(artifacts),
+    downloadArtifact: vi.fn().mockResolvedValue(undefined),
     createAndQueue: vi.fn().mockResolvedValue({ view: running, queued: true }),
     queue: vi.fn().mockResolvedValue({ queued: true }),
     resumeAndQueue: vi.fn().mockResolvedValue({ view: running, queued: true }),
@@ -118,6 +216,66 @@ describe('SupraMAS task panel shell', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: zh['action.refresh'] }))
     await waitFor(() => { expect(list).toHaveBeenCalledTimes(2) })
   })
+
+  it('opens the accepted strategy tree, drills into local evidence, and downloads final outputs', async () => {
+    const api = port({ list: vi.fn().mockResolvedValue([completed]) })
+    render(<SupraMasTaskPanel {...props(api)} />)
+    const dialog = await openPanel()
+    const row = await within(dialog).findByRole('article', { name: completed.stage1!.researchTopic })
+
+    fireEvent.click(within(row).getByRole('button', { name: zh['action.details'] }))
+    const workspace = await within(dialog).findByRole('region', { name: zh['detail.title'] })
+    expect(await within(workspace).findByRole('treeitem', { name: /BZO pinning paper/ })).toBeDefined()
+    expect(within(workspace).getByText('Add BZO artificial pinning centers.')).toBeDefined()
+    expect(api.tree).toHaveBeenCalledWith(completed.run.id)
+    expect(api.paper).toHaveBeenCalledWith(completed.run.id, 'paper-1')
+
+    fireEvent.click(within(workspace).getAllByRole('button', { name: zh['action.evidence'] })[0]!)
+    expect(await within(workspace).findByText(evidence.text)).toBeDefined()
+    expect(api.evidence).toHaveBeenCalledWith(completed.run.id, 'paper-1', 'paper-1-c1', 0, 4_000)
+
+    fireEvent.click(within(workspace).getByRole('button', { name: /strategy_tree\.json/ }))
+    await waitFor(() => {
+      expect(api.downloadArtifact).toHaveBeenCalledWith(completed.run.id, 'strategy_tree.json')
+    })
+    fireEvent.click(within(workspace).getByRole('button', { name: zh['action.back'] }))
+    expect(within(dialog).getByRole('heading', { name: zh['form.title'] })).toBeDefined()
+  })
+
+  it('refreshes an active detail view and stops polling after the task settles', async () => {
+    const get = vi.fn()
+      .mockResolvedValueOnce(running)
+      .mockResolvedValue(completed)
+    const activeTree: SupraMasStrategyTreeViewV1 = {
+      apiVersion: 1,
+      runId: running.run.id,
+      revision: running.run.revision,
+      status: 'active',
+      nodes: [],
+      edges: [],
+    }
+    const pendingArtifacts: SupraMasArtifactsViewV1 = {
+      apiVersion: 1,
+      runId: running.run.id,
+      ready: false,
+      files: artifacts.files.map(file => ({ ...file, ready: false })),
+    }
+    const api = port({
+      list: vi.fn().mockResolvedValue([running]),
+      get,
+      tree: vi.fn().mockResolvedValue(activeTree),
+      artifacts: vi.fn().mockResolvedValue(pendingArtifacts),
+    })
+    render(<SupraMasTaskPanel {...props(api)} />)
+    const dialog = await openPanel()
+    const row = await within(dialog).findByRole('article', { name: running.stage1!.researchTopic })
+    fireEvent.click(within(row).getByRole('button', { name: zh['action.details'] }))
+    await within(dialog).findByRole('region', { name: zh['detail.title'] })
+
+    await waitFor(() => { expect(get).toHaveBeenCalledTimes(2) }, { timeout: 4_500 })
+    await new Promise(resolve => window.setTimeout(resolve, 3_200))
+    expect(get).toHaveBeenCalledTimes(2)
+  }, 10_000)
 })
 
 describe('SupraMAS task actions', () => {

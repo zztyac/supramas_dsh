@@ -1,5 +1,5 @@
 ---
-description: "用于创建、派发、恢复和查看 SupraMAS 任务的非技术型浏览器面板。"
+description: "用于运行和检查证据支撑型 SupraMAS 任务的非技术浏览器工作区。"
 kind: "package-reference"
 ---
 
@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-本包在 DSH Web 左侧栏加入 **材料任务** 入口。非技术用户可以通过引导式 Stage 1 表单、易读进度卡片和操作按钮，创建、派发、恢复、取消或刷新持久 SupraMAS 任务。
+本包在 DSH Web 左侧栏加入 **材料任务** 入口。非技术用户可以通过引导式 Stage 1 表单、实时进度、已接受策略树工作区、论文与证据检查、标准成果下载和操作按钮，创建、派发、恢复、取消或刷新持久 SupraMAS 任务。
 
 ## 目录
 
@@ -31,7 +31,7 @@ pnpm run build:web
 pnpm dsh web --patch packages/bundle/supramas/cordis.patch.yml
 ```
 
-然后打开 `http://127.0.0.1:3080`，使用 **SupraMAS** 预设新建或打开会话，点击左下角 **材料任务**，填写研究目标，再点击 **创建并启动**。
+然后打开 `http://127.0.0.1:3080`，使用 **SupraMAS** 预设新建或打开会话，点击左下角 **材料任务**，填写研究目标，再点击 **创建并启动**。在任务上打开 **查看研究结果**，即可检查已接受节点、沿限制条件到论文的边继续浏览、打开证据块并下载已就绪成果。
 
 创建操作会先把任务提交到持久存储。如果已有打开的会话，面板会把协调指令加入该会话队列；如果没有会话，任务仍然安全保存，面板会提示用户打开 SupraMAS 会话，再点击 **在当前会话执行**。
 
@@ -39,9 +39,9 @@ pnpm dsh web --patch packages/bundle/supramas/cordis.patch.yml
 
 ## 实现说明
 
-浏览器插件在根作用域注册一个 `sidebar.footer.action`。它只通过 `ctx.remote.supramas` 读写任务，不在 React 中复制 Stage 1 状态机。会话派发复用现有 Sessions binding，并加入一条协调消息，要求 coordinator 在执行前先读取持久 `next_action`。
+浏览器插件在根作用域注册一个 `sidebar.footer.action`。它只通过 `ctx.remote.supramas` 读写任务，不在 React 中复制 Stage 1 状态机。活动任务详情每三秒轮询一次，并在进入终态后停止。研究工作区只渲染已接受的策略树投影，且仅在用户选择证据块后加载正文。会话派发复用现有 Sessions binding，并加入一条协调消息，要求 coordinator 在执行前先读取持久 `next_action`。
 
-弹窗支持键盘关闭和焦点恢复，提供中英文词典，并覆盖加载、空状态、失败状态以及带 revision 的恢复操作。
+弹窗支持键盘关闭和焦点恢复，提供中英文词典，并覆盖加载、空状态、失败状态、带 revision 的恢复操作、无障碍树语义、响应式树/详情双栏和跟随主题的研究面板。
 
 <a id="model-experience"></a>
 
@@ -57,8 +57,8 @@ pnpm dsh web --patch packages/bundle/supramas/cordis.patch.yml
 
 ## 已知限制与后续工作
 
-- 当前需要点击 **刷新** 才能更新进度，尚未接入实时任务事件。
-- 最终策略树可视化、证据下钻和产物下载属于下一 UI 里程碑。
+- 活动任务详情采用轮询更新，尚未接入服务端推送的实时任务事件。
+- 大型证据块以有界切片读取，标准成果下载受 API 载荷上限约束。
 - 表单有意只开放常用的研究目标、材料范围、目标性能和深度；高级重试及宽度限制继续使用安全的运行时默认值。
 
 <a id="dev-note"></a>

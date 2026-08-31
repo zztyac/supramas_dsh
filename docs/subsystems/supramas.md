@@ -24,7 +24,7 @@ The durable next action selects one legal step: build a root, build a child for 
 
 ## Browser boundary
 
-The V1 Remote view exposes task identity, lifecycle state, limits, aggregate progress, the next action, and browser-safe readiness for the three final outputs. It intentionally omits host filesystem paths and internal workflow payloads. The non-technical dashboard creates and controls tasks through that boundary, then queues a bounded coordinator message into the active SupraMAS Session.
+The V1 Remote view exposes task identity, lifecycle state, limits, aggregate progress, the next action, reviewer-accepted tree projections, text-free paper chunk catalogs, bounded evidence slices, and bounded content for the three canonical final outputs. It intentionally omits host filesystem paths, pending candidates, and internal workflow payloads. The non-technical workspace creates and controls tasks through that boundary, polls active details until terminal state, and queues a bounded coordinator message into the active SupraMAS Session.
 
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
@@ -202,6 +202,16 @@ syncPaper(id: SupraMasRunIdBrand, paperId: string): Promise<string>
 async outputStatus(id: SupraMasRunIdBrand): Promise<Stage1OutputStatus[]>
 
 /**
+ * Read one canonical completed output through a caller-supplied complete byte bound.
+ * The fixed output-name vocabulary prevents this method from becoming a filesystem read primitive.
+ * @param id - Owning durable run identity.
+ * @param name - One closed canonical output basename.
+ * @param maxBytes - Maximum complete payload size, capped again by the service.
+ * @returns detached exact output bytes.
+ */
+async readOutput(id: SupraMasRunIdBrand, name: Stage1OutputName, maxBytes: number): Promise<Uint8Array>
+
+/**
  * Idempotently materialize every compatibility artifact for a completed run.
  * @param id - Owning durable completed run identity.
  * @returns the stable relative artifact manifest.
@@ -232,11 +242,45 @@ Host service backing the generated `ctx.remote.supramas` namespace.
 @Remote get(runId: string): Promise<SupraMasRunViewV1>
 
 /**
+ * Read the current accepted Stage 1 tree without exposing pending candidates or Host paths.
+ * @param runId - Stable public run identity.
+ * @returns accepted nodes and edges at the exact durable revision.
+ */
+@Remote tree(runId: string): Promise<SupraMasStrategyTreeViewV1>
+
+/**
+ * List text-free local evidence chunks for one run-local paper.
+ * @param runId - Stable public run identity.
+ * @param paperId - Stable paper identity selected from the accepted tree.
+ * @returns paper metadata and bounded chunk summaries without local paths or chunk text.
+ */
+@Remote paper(runId: string, paperId: string): Promise<SupraMasPaperEvidenceViewV1>
+
+/**
+ * Read one bounded text slice from an identified run-local evidence chunk.
+ * @param runId - Stable public run identity.
+ * @param paperId - Owning paper identity.
+ * @param chunkId - Exact local evidence chunk identity.
+ * @param start - Zero-based character offset.
+ * @param maxCharacters - Complete response character bound, at most 8,000.
+ * @returns one detached evidence slice with explicit range metadata.
+ */
+@Remote evidence( runId: string, paperId: string, chunkId: string, start: number, maxCharacters: number, ): Promise<SupraMasEvidenceSliceViewV1>
+
+/**
  * Read the browser-safe readiness of the three canonical Stage 1 outputs.
  * @param runId - Stable public run identity.
  * @returns fixed output names and readiness without Host paths.
  */
 @Remote async artifacts(runId: string): Promise<SupraMasArtifactsViewV1>
+
+/**
+ * Read one bounded canonical Stage 1 output for browser download.
+ * @param runId - Stable public run identity.
+ * @param name - One closed canonical output basename.
+ * @returns complete UTF-8 content and media metadata without a Host path.
+ */
+@Remote async artifact(runId: string, name: SupraMasOutputNameV1): Promise<SupraMasArtifactContentV1>
 
 /**
  * Create a task, approve its normalized task definition, and start Stage 1.

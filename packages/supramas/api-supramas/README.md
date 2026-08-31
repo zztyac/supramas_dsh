@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-This package exposes the durable SupraMAS runtime to trusted DSH browser clients through the versioned `supramas` Typert Remote namespace. It lists and reads tasks, creates and starts a Stage 1 workflow, resumes recoverable work, and cancels active work with compare-and-set revisions.
+This package exposes the durable SupraMAS runtime to trusted DSH browser clients through the versioned `supramas` Typert Remote namespace. It lists and reads tasks, projects reviewer-accepted strategy trees and paper evidence, serves bounded canonical outputs, creates and starts a Stage 1 workflow, resumes recoverable work, and cancels active work with compare-and-set revisions.
 
 ## Table of Contents
 
@@ -23,18 +23,22 @@ This package exposes the durable SupraMAS runtime to trusted DSH browser clients
 
 Mount it after `@deepseek-ai/dsh-supramas`. The shipped SupraMAS bundle already preserves that order and mounts the browser dashboard after this API.
 
-The public V1 view contains task identity, lifecycle state, Stage 1 limits, aggregate progress, and the next durable action. Local run directories, task-file paths, evidence paths, and internal workflow payloads do not cross the browser boundary.
+The public V1 view contains task identity, lifecycle state, Stage 1 limits, aggregate progress, the next durable action, accepted strategy-tree records, text-free evidence catalogs, bounded evidence slices, and canonical output content. Local run directories, task-file paths, evidence paths, pending candidates, and internal workflow payloads do not cross the browser boundary.
 
 | Remote method | Purpose |
 | --- | --- |
 | `list()` | Return every durable material task in creation order. |
 | `get(runId)` | Return one current task view. |
+| `tree(runId)` | Return only reviewer-accepted nodes and edges in a browser-safe tree. |
+| `paper(runId, paperId)` | Return accepted paper metadata and a text-free evidence chunk catalog. |
+| `evidence(runId, paperId, chunkId, start, maxCharacters)` | Return one bounded evidence-text slice, up to 8,000 characters. |
 | `artifacts(runId)` | Return the three final output names and readiness without host paths. |
+| `artifact(runId, name)` | Return one canonical UTF-8 output, bounded to 2 MiB at the Remote boundary. |
 | `createStage1(request)` | Normalize input, create the run, approve the task, and enter Stage 1. |
 | `resume(runId, revision)` | Resume a recoverable task under revision control. |
 | `cancel(runId, revision)` | Cancel a non-terminal task under revision control. |
 
-Caller-correctable failures use stable codes for malformed input, duplicate jobs, missing runs, stale revisions, and invalid lifecycle transitions.
+Caller-correctable failures use stable codes for malformed input, duplicate jobs, missing runs or papers, stale revisions, unavailable artifacts, and invalid lifecycle transitions.
 
 ## Understand the implementation
 
@@ -50,8 +54,8 @@ None; browser RPC calls never enter provider requests.
 
 ## Known Limitations and Deferred Work
 
-- V1 is request/response only; the dashboard refreshes explicitly instead of receiving a task event stream.
-- The API projects progress and next action, but does not yet expose final artifact download or evidence browsing.
+- V1 is request/response only; the dashboard polls active task details instead of receiving a task event stream.
+- Evidence access is intentionally sliced and canonical output reads are intentionally size-bounded.
 - Only Stage 1 strategy-tree work is represented.
 
 ### Dev Note

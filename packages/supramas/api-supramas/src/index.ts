@@ -13,13 +13,21 @@ import '@deepseek-ai/dsh-supramas-artifacts'
 import { Remote, TypertRemoteFailure, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import {
   SUPRAMAS_API_VERSION,
+  type SupraMasArtifactContentV1,
   type SupraMasArtifactsViewV1,
   type SupraMasCreateStage1RequestV1,
+  type SupraMasEvidenceRefV1,
+  type SupraMasEvidenceSliceViewV1,
   type SupraMasNextActionV1,
+  type SupraMasOutputNameV1,
+  type SupraMasPaperEvidenceViewV1,
   type SupraMasRunListV1,
   type SupraMasRunSummaryV1,
   type SupraMasRunViewV1,
   type SupraMasStage1ViewV1,
+  type SupraMasStrategyTreeViewV1,
+  type SupraMasTreeEdgeV1,
+  type SupraMasTreeNodeV1,
 } from './types.ts'
 
 export type * from './types.ts'
@@ -27,6 +35,20 @@ export { SUPRAMAS_API_VERSION } from './types.ts'
 
 const JOB_ID = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/
 const RUN_ID = /^supramas:[a-zA-Z0-9][a-zA-Z0-9._-]*$/
+const MAX_PUBLIC_ID_LENGTH = 256
+const MAX_EVIDENCE_CHARACTERS = 8_000
+const DEFAULT_EVIDENCE_CHARACTERS = 4_000
+const MAX_ARTIFACT_BYTES = 2 * 1024 * 1024
+const OUTPUT_NAMES: readonly SupraMasOutputNameV1[] = [
+  'strategy_tree.json',
+  'node_review_log.jsonl',
+  'review_report.md',
+]
+const OUTPUT_MEDIA_TYPES: Record<SupraMasOutputNameV1, SupraMasArtifactContentV1['mediaType']> = {
+  'strategy_tree.json': 'application/json',
+  'node_review_log.jsonl': 'application/x-ndjson',
+  'review_report.md': 'text/markdown',
+}
 
 interface NormalizedCreateRequest {
   readonly jobId: string
@@ -76,6 +98,35 @@ function integer(value: number | undefined, fallback: number, name: string, mini
 function cap(value: number | null | undefined, name: string): number | null {
   if (value === undefined || value === null) return null
   return integer(value, value, name, 1)
+}
+
+function boundedId(value: unknown, name: string): string {
+  const id = nonempty(value, name)
+  if (id.length > MAX_PUBLIC_ID_LENGTH) throw badRequest(`${name} must not exceed ${MAX_PUBLIC_ID_LENGTH} characters`)
+  return id
+}
+
+function nonnegative(value: unknown, fallback: number, name: string): number {
+  const resolved = value === undefined ? fallback : value
+  if (!Number.isSafeInteger(resolved) || (resolved as number) < 0) {
+    throw badRequest(`${name} must be a non-negative safe integer`)
+  }
+  return resolved as number
+}
+
+function evidenceLength(value: unknown): number {
+  const resolved = value === undefined ? DEFAULT_EVIDENCE_CHARACTERS : value
+  if (!Number.isSafeInteger(resolved) || (resolved as number) < 1 || (resolved as number) > MAX_EVIDENCE_CHARACTERS) {
+    throw badRequest(`maxCharacters must be a safe integer from 1 to ${MAX_EVIDENCE_CHARACTERS}`)
+  }
+  return resolved as number
+}
+
+function outputName(value: unknown): SupraMasOutputNameV1 {
+  if (typeof value !== 'string' || !OUTPUT_NAMES.includes(value as SupraMasOutputNameV1)) {
+    throw badRequest('name must be one of the canonical Stage 1 output names')
+  }
+  return value as SupraMasOutputNameV1
 }
 
 function normalizeCreate(request: SupraMasCreateStage1RequestV1, generatedJobId: string): NormalizedCreateRequest {
@@ -180,6 +231,63 @@ function stage1View(state: Stage1RunState): SupraMasStage1ViewV1 {
   }
 }
 
+type Stage1Node = Stage1RunState['workflow']['nodes'][number]
+type Stage1Edge = Stage1RunState['workflow']['edges'][number]
+
+function evidenceRefView(evidence: Stage1Node['strategy_records'][number]['evidence']): SupraMasEvidenceRefV1 {
+  return {
+    chunkId: evidence.chunk_id,
+    page: evidence.page ?? null,
+    evidenceText: evidence.evidence_text,
+  }
+}
+
+function treeNodeView(node: Stage1Node): SupraMasTreeNodeV1 {
+  return {
+    nodeId: node.node_id,
+    level: node.level,
+    parentId: node.parent_id ?? null,
+    paperId: node.paper_id,
+    paperTitle: node.paper_title,
+    year: node.year ?? null,
+    doi: node.doi ?? null,
+    url: node.url ?? null,
+    sourceType: node.source_type ?? null,
+    notes: [...(node.notes ?? [])],
+    strategyRecords: node.strategy_records.map(record => ({
+      recordId: record.record_id,
+      tuningDimension: record.tuning_dimension,
+      tuningStrategy: record.tuning_strategy,
+      tuningEffect: record.tuning_effect,
+      evidence: evidenceRefView(record.evidence),
+      confidence: record.confidence,
+    })),
+    limitationRecords: node.limitation_records.map(record => ({
+      limitationId: record.limitation_id,
+      limitation: record.limitation,
+      expectation: record.expectation,
+      relatedRecordIds: [...(record.related_record_ids ?? [])],
+      evidence: evidenceRefView(record.evidence),
+      confidence: record.confidence,
+    })),
+  }
+}
+
+function treeEdgeView(edge: Stage1Edge): SupraMasTreeEdgeV1 {
+  return {
+    edgeId: edge.edge_id ?? null,
+    parentNodeId: edge.parent_node_id,
+    parentLimitationId: edge.parent_limitation_id,
+    childNodeId: edge.child_node_id,
+    childRecordId: edge.child_record_id ?? null,
+    parentExpectation: edge.parent_expectation,
+    childTuningEffect: edge.child_tuning_effect ?? null,
+    edgeType: edge.edge_type,
+    edgeRationale: edge.edge_rationale,
+    confidence: edge.confidence,
+  }
+}
+
 /** Host service backing the generated `ctx.remote.supramas` namespace. */
 export class SupraMasController extends TypertRemoteService {
   static inject = ['supramas', 'supramasArtifacts']
@@ -218,6 +326,121 @@ export class SupraMasController extends TypertRemoteService {
   }
 
   /**
+   * Read the current accepted Stage 1 tree without exposing pending candidates or Host paths.
+   * @param runId - Stable public run identity.
+   * @returns accepted nodes and edges at the exact durable revision.
+   */
+  @Remote
+  tree(runId: string): Promise<SupraMasStrategyTreeViewV1> {
+    return Promise.resolve().then(() => {
+      const id = this.runId(runId)
+      const run = this.ctx.supramas.get(id)
+      if (run === undefined) throw this.notFound(runId)
+      const state = this.ctx.supramas.getStage1(id)
+      if (state === undefined) throw badRequest('run has no Stage 1 workflow')
+      return {
+        apiVersion: SUPRAMAS_API_VERSION,
+        runId,
+        revision: state.run.revision,
+        status: state.workflow.status,
+        nodes: state.workflow.nodes.map(treeNodeView),
+        edges: state.workflow.edges.map(treeEdgeView),
+      }
+    })
+  }
+
+  /**
+   * List text-free local evidence chunks for one run-local paper.
+   * @param runId - Stable public run identity.
+   * @param paperId - Stable paper identity selected from the accepted tree.
+   * @returns paper metadata and bounded chunk summaries without local paths or chunk text.
+   */
+  @Remote
+  paper(runId: string, paperId: string): Promise<SupraMasPaperEvidenceViewV1> {
+    return Promise.resolve().then(() => {
+      const id = this.runId(runId)
+      if (this.ctx.supramas.get(id) === undefined) throw this.notFound(runId)
+      const normalizedPaperId = boundedId(paperId, 'paperId')
+      const paper = this.ctx.supramas.readPaper(id, normalizedPaperId)
+      if (paper === undefined) {
+        throw new TypertRemoteFailure({
+          code: 'supramas-paper-not-found',
+          message: 'The selected paper is not stored for this material task.',
+          details: { runId, paperId: normalizedPaperId },
+        })
+      }
+      return {
+        apiVersion: SUPRAMAS_API_VERSION,
+        runId,
+        paperId: paper.paper_id,
+        paperTitle: paper.paper_title,
+        sourceType: paper.source_type,
+        chunks: paper.chunks.map(chunk => ({
+          chunkId: chunk.chunk_id,
+          page: chunk.page ?? null,
+          characters: chunk.text.length,
+        })),
+      }
+    })
+  }
+
+  /**
+   * Read one bounded text slice from an identified run-local evidence chunk.
+   * @param runId - Stable public run identity.
+   * @param paperId - Owning paper identity.
+   * @param chunkId - Exact local evidence chunk identity.
+   * @param start - Zero-based character offset.
+   * @param maxCharacters - Complete response character bound, at most 8,000.
+   * @returns one detached evidence slice with explicit range metadata.
+   */
+  @Remote
+  evidence(
+    runId: string,
+    paperId: string,
+    chunkId: string,
+    start: number,
+    maxCharacters: number,
+  ): Promise<SupraMasEvidenceSliceViewV1> {
+    return Promise.resolve().then(() => {
+      const id = this.runId(runId)
+      if (this.ctx.supramas.get(id) === undefined) throw this.notFound(runId)
+      const normalizedPaperId = boundedId(paperId, 'paperId')
+      const normalizedChunkId = boundedId(chunkId, 'chunkId')
+      const offset = nonnegative(start, 0, 'start')
+      const length = evidenceLength(maxCharacters)
+      const paper = this.ctx.supramas.readPaper(id, normalizedPaperId)
+      if (paper === undefined) {
+        throw new TypertRemoteFailure({
+          code: 'supramas-paper-not-found',
+          message: 'The selected paper is not stored for this material task.',
+          details: { runId, paperId: normalizedPaperId },
+        })
+      }
+      const chunk = paper.chunks.find(candidate => candidate.chunk_id === normalizedChunkId)
+      if (chunk === undefined) {
+        throw new TypertRemoteFailure({
+          code: 'supramas-chunk-not-found',
+          message: 'The selected evidence chunk is not stored for this paper.',
+          details: { runId, paperId: normalizedPaperId, chunkId: normalizedChunkId },
+        })
+      }
+      const boundedStart = Math.min(offset, chunk.text.length)
+      const end = Math.min(boundedStart + length, chunk.text.length)
+      return {
+        apiVersion: SUPRAMAS_API_VERSION,
+        runId,
+        paperId: paper.paper_id,
+        chunkId: chunk.chunk_id,
+        page: chunk.page ?? null,
+        start: boundedStart,
+        end,
+        totalCharacters: chunk.text.length,
+        text: chunk.text.slice(boundedStart, end),
+      }
+    })
+  }
+
+  /**
    * Read the browser-safe readiness of the three canonical Stage 1 outputs.
    * @param runId - Stable public run identity.
    * @returns fixed output names and readiness without Host paths.
@@ -232,6 +455,44 @@ export class SupraMasController extends TypertRemoteService {
       runId,
       ready: files.every(file => file.ready),
       files,
+    }
+  }
+
+  /**
+   * Read one bounded canonical Stage 1 output for browser download.
+   * @param runId - Stable public run identity.
+   * @param name - One closed canonical output basename.
+   * @returns complete UTF-8 content and media metadata without a Host path.
+   */
+  @Remote
+  async artifact(runId: string, name: SupraMasOutputNameV1): Promise<SupraMasArtifactContentV1> {
+    const id = this.runId(runId)
+    if (this.ctx.supramas.get(id) === undefined) throw this.notFound(runId)
+    const normalizedName = outputName(name)
+    const status = await this.ctx.supramasArtifacts.outputStatus(id)
+    if (!status.find(file => file.name === normalizedName)?.ready) {
+      throw new TypertRemoteFailure({
+        code: 'supramas-artifact-not-ready',
+        message: 'The selected final output is not ready yet.',
+        details: { runId, name: normalizedName },
+      })
+    }
+    try {
+      const bytes = await this.ctx.supramasArtifacts.readOutput(id, normalizedName, MAX_ARTIFACT_BYTES)
+      return {
+        apiVersion: SUPRAMAS_API_VERSION,
+        runId,
+        name: normalizedName,
+        mediaType: OUTPUT_MEDIA_TYPES[normalizedName],
+        byteLength: bytes.byteLength,
+        content: new TextDecoder('utf-8', { fatal: true }).decode(bytes),
+      }
+    } catch {
+      throw new TypertRemoteFailure({
+        code: 'internal',
+        message: 'The selected final output could not be read.',
+        details: {},
+      })
     }
   }
 

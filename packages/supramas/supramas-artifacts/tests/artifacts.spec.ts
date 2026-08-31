@@ -213,4 +213,19 @@ describe('SupraMAS compatibility artifacts', () => {
       'strategy_tree.json',
     ])
   })
+
+  it('reads only bounded canonical final outputs without accepting caller paths', async () => {
+    const { ctx } = await setup()
+    const completed = await complete(ctx)
+    await ctx.supramasArtifacts.syncCompleted(completed.run.id)
+
+    const bytes = await ctx.supramasArtifacts.readOutput(completed.run.id, 'strategy_tree.json', 64 * 1024)
+    expect(new TextDecoder().decode(bytes)).toContain('"job_id": "artifact-demo"')
+    await expect(ctx.supramasArtifacts.readOutput(completed.run.id, '../tree_state.json' as never, 64 * 1024))
+      .rejects.toThrow('canonical output name')
+    await expect(ctx.supramasArtifacts.readOutput(completed.run.id, 'strategy_tree.json', 8))
+      .rejects.toThrow('exceeds')
+    await expect(ctx.supramasArtifacts.readOutput(completed.run.id, 'strategy_tree.json', 0))
+      .rejects.toThrow('positive safe integer')
+  })
 })

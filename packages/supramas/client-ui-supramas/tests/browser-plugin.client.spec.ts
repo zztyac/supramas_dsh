@@ -1,6 +1,6 @@
 /** Browser assembly: slot registration, Remote bridge, Session queueing, and teardown. */
 import { Context } from '@deepseek-ai/cordis'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import InvariantRegistry from '@deepseek-ai/dsh-invariants'
 import type {
   SupraMasCreateStage1RequestV1,
@@ -13,6 +13,11 @@ import { apply as applyNode } from '../src/index.ts'
 import * as UiInvariant from '../src/invariant.ts'
 import { en, NS, zh } from '../src/client/locales.ts'
 import type { SupraMasUiPort } from '../src/client/SupraMasTaskPanel.tsx'
+
+afterEach(() => {
+  vi.restoreAllMocks()
+  vi.unstubAllGlobals()
+})
 
 const request: SupraMasCreateStage1RequestV1 = {
   jobId: 'ui-bridge-demo',
@@ -62,6 +67,12 @@ interface Bench {
   readonly prompt: ReturnType<typeof vi.fn>
   readonly remote: {
     readonly list: ReturnType<typeof vi.fn>
+    readonly get: ReturnType<typeof vi.fn>
+    readonly tree: ReturnType<typeof vi.fn>
+    readonly paper: ReturnType<typeof vi.fn>
+    readonly evidence: ReturnType<typeof vi.fn>
+    readonly artifacts: ReturnType<typeof vi.fn>
+    readonly artifact: ReturnType<typeof vi.fn>
     readonly createStage1: ReturnType<typeof vi.fn>
     readonly resume: ReturnType<typeof vi.fn>
     readonly cancel: ReturnType<typeof vi.fn>
@@ -86,6 +97,12 @@ async function bench(withSession = true): Promise<Bench> {
   const ok = <T>(value: T) => Promise.resolve({ ok: true, value })
   const remote = {
     list: vi.fn(() => ok({ apiVersion: 1, items: [view] })),
+    get: vi.fn(() => ok(view)),
+    tree: vi.fn(() => ok({ apiVersion: 1, runId: view.run.id, revision: view.run.revision, status: 'active', nodes: [], edges: [] })),
+    paper: vi.fn(() => ok({ apiVersion: 1, runId: view.run.id, paperId: 'paper-1', paperTitle: 'Paper', sourceType: 'experimental', chunks: [] })),
+    evidence: vi.fn(() => ok({ apiVersion: 1, runId: view.run.id, paperId: 'paper-1', chunkId: 'c1', page: 1, start: 0, end: 4, totalCharacters: 4, text: 'text' })),
+    artifacts: vi.fn(() => ok({ apiVersion: 1, runId: view.run.id, ready: true, files: [{ name: 'strategy_tree.json', ready: true }] })),
+    artifact: vi.fn(() => ok({ apiVersion: 1, runId: view.run.id, name: 'strategy_tree.json', mediaType: 'application/json', byteLength: 3, content: '{}\n' })),
     createStage1: vi.fn(() => ok(view)),
     resume: vi.fn(() => ok(view)),
     cancel: vi.fn(() => ok(view)),
@@ -124,6 +141,11 @@ describe('SupraMAS browser plugin', () => {
   it('bridges task operations to the typed Remote and queues the coordinator in the current session', async () => {
     const b = await bench()
     await expect(b.api.list()).resolves.toEqual([view])
+    await expect(b.api.get(view.run.id)).resolves.toEqual(view)
+    await expect(b.api.tree(view.run.id)).resolves.toMatchObject({ runId: view.run.id, nodes: [] })
+    await expect(b.api.paper(view.run.id, 'paper-1')).resolves.toMatchObject({ paperId: 'paper-1' })
+    await expect(b.api.evidence(view.run.id, 'paper-1', 'c1', 0, 4_000)).resolves.toMatchObject({ text: 'text' })
+    await expect(b.api.artifacts(view.run.id)).resolves.toMatchObject({ ready: true })
     const created = await b.api.createAndQueue(request)
     expect(b.remote.createStage1).toHaveBeenCalledWith(request)
     expect(created).toEqual({ view, queued: true })
@@ -135,6 +157,24 @@ describe('SupraMAS browser plugin', () => {
     expect(b.remote.resume).toHaveBeenCalledWith(view.run.id, view.run.revision)
     await expect(b.api.cancel(view.run.id, view.run.revision)).resolves.toEqual(view)
     expect(b.remote.cancel).toHaveBeenCalledWith(view.run.id, view.run.revision)
+    await b.fiber.dispose()
+  })
+
+  it('downloads a canonical output through the Remote payload without exposing Host paths', async () => {
+    const b = await bench()
+    const click = vi.fn()
+    const anchor = { href: '', download: '', rel: '', click }
+    const createObjectURL = vi.fn(() => 'blob:supramas-output')
+    const revokeObjectURL = vi.fn()
+    vi.stubGlobal('document', { createElement: vi.fn(() => anchor) })
+    vi.stubGlobal('URL', { createObjectURL, revokeObjectURL })
+
+    await b.api.downloadArtifact(view.run.id, 'strategy_tree.json')
+
+    expect(b.remote.artifact).toHaveBeenCalledWith(view.run.id, 'strategy_tree.json')
+    expect(createObjectURL).toHaveBeenCalledOnce()
+    expect(click).toHaveBeenCalledOnce()
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:supramas-output')
     await b.fiber.dispose()
   })
 

@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-This package materializes a durable SupraMAS Stage 1 run as the canonical `runs/<jobId>` file layout used by the Codex-native workflow. It writes the approved task, stored paper metadata and chunks, restart state, final strategy tree, review log, and review report below one configured workspace root. Repeating an export replaces complete files atomically and produces the same bytes for unchanged durable state.
+This package materializes a durable SupraMAS Stage 1 run as the canonical `runs/<jobId>` file layout used by the Codex-native workflow. It writes the approved task, stored paper metadata and chunks, restart state, final strategy tree, review log, and review report below one configured workspace root. It also serves bounded reads of the three canonical outputs to trusted Host consumers. Repeating an export replaces complete files atomically and produces the same bytes for unchanged durable state.
 
 ## Table of Contents
 
@@ -37,7 +37,7 @@ Mount it after `@deepseek-ai/dsh-supramas` and before the SupraMAS API or tool c
 |---|---|---|
 | `root` | required | Absolute workspace directory that owns the generated `runs/` tree. |
 
-The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-supramas-artifacts) is the exhaustive source for accepted fields. `syncTask()` and `syncPaper()` update working files during execution; `syncCompleted()` writes the complete final contract; `outputStatus()` returns only stable output names and readiness.
+The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-supramas-artifacts) is the exhaustive source for accepted fields. `syncTask()` and `syncPaper()` update working files during execution; `syncCompleted()` writes the complete final contract; `outputStatus()` returns only stable output names and readiness; `readOutput()` accepts only those names and returns a complete UTF-8 file within the caller's bounded size limit.
 
 -----
 
@@ -47,7 +47,7 @@ The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-a
 <details>
 <summary>Implementation internals — click to expand</summary>
 
-`SupraMasArtifacts` reads validated detached state from `ctx.supramas`, renders the specialized Stage 1 YAML/JSON/JSONL/Markdown forms, and confines every resolved path to the configured root. A serialized operation tail prevents concurrent exports from interleaving, while the shared atomic-write utility publishes complete files.
+`SupraMasArtifacts` reads validated detached state from `ctx.supramas`, renders the specialized Stage 1 YAML/JSON/JSONL/Markdown forms, and confines every resolved path to the configured root. A serialized operation tail prevents concurrent exports from interleaving, while the shared atomic-write utility publishes complete files. Output reads use fixed names, bounded file handles, and a growth check so callers never receive a truncated file as if it were complete.
 
 </details>
 
@@ -77,6 +77,7 @@ None; this service adds no prompt or tool schema by itself.
 
 - The package exports stored metadata and text chunks; it does not acquire or parse PDFs.
 - Final export requires every accepted paper to exist in the durable per-run evidence catalog.
+- `readOutput()` rejects files beyond the requested limit instead of streaming or returning partial content.
 - The renderer implements the SupraMAS Stage 1 contract and is not a generic YAML serialization service.
 
 <a id="dev-note"></a>

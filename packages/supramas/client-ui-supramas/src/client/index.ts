@@ -2,9 +2,15 @@
 
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type {
+  SupraMasArtifactContentV1,
+  SupraMasArtifactsViewV1,
   SupraMasCreateStage1RequestV1,
+  SupraMasEvidenceSliceViewV1,
+  SupraMasOutputNameV1,
+  SupraMasPaperEvidenceViewV1,
   SupraMasRunListV1,
   SupraMasRunViewV1,
+  SupraMasStrategyTreeViewV1,
 } from '@deepseek-ai/dsh-api-supramas/types'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import type {} from '@deepseek-ai/dsh-api-session-controller/client'
@@ -28,6 +34,19 @@ function unwrap<T>(result: Result<T>): T {
   if (result.ok && result.value !== undefined) return result.value
   const failure = result.error
   throw new Error(failure === undefined ? 'Remote operation returned no value' : `${failure.code}: ${failure.message}`)
+}
+
+function saveArtifact(artifact: SupraMasArtifactContentV1): void {
+  const url = URL.createObjectURL(new Blob([artifact.content], { type: artifact.mediaType }))
+  try {
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = artifact.name
+    anchor.rel = 'noopener'
+    anchor.click()
+  } finally {
+    URL.revokeObjectURL(url)
+  }
 }
 
 /**
@@ -67,6 +86,20 @@ export function apply(ctx: ClientContext): void {
     list: async () => {
       const value = unwrap<SupraMasRunListV1>(await ctx.remote.supramas.list())
       return value.items
+    },
+    get: async runId => unwrap<SupraMasRunViewV1>(await ctx.remote.supramas.get(runId)),
+    tree: async runId => unwrap<SupraMasStrategyTreeViewV1>(await ctx.remote.supramas.tree(runId)),
+    paper: async (runId, paperId) =>
+      unwrap<SupraMasPaperEvidenceViewV1>(await ctx.remote.supramas.paper(runId, paperId)),
+    evidence: async (runId, paperId, chunkId, start, maxCharacters) =>
+      unwrap<SupraMasEvidenceSliceViewV1>(
+        await ctx.remote.supramas.evidence(runId, paperId, chunkId, start, maxCharacters),
+      ),
+    artifacts: async runId =>
+      unwrap<SupraMasArtifactsViewV1>(await ctx.remote.supramas.artifacts(runId)),
+    downloadArtifact: async (runId: string, name: SupraMasOutputNameV1) => {
+      const artifact = unwrap<SupraMasArtifactContentV1>(await ctx.remote.supramas.artifact(runId, name))
+      saveArtifact(artifact)
     },
     createAndQueue: async (request: SupraMasCreateStage1RequestV1) => {
       const view = unwrap<SupraMasRunViewV1>(await ctx.remote.supramas.createStage1(request))

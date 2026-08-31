@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-本包把持久化的 SupraMAS Stage 1 运行转换为 Codex 原生流程使用的标准 `runs/<jobId>` 文件布局。它在一个配置好的工作区根目录下写入已批准任务、论文元数据与文本块、重启状态、最终策略树、审查日志和审查报告。对未变化的持久状态重复导出时，服务会原子替换完整文件并生成相同字节。
+本包把持久化的 SupraMAS Stage 1 运行转换为 Codex 原生流程使用的标准 `runs/<jobId>` 文件布局。它在一个配置好的工作区根目录下写入已批准任务、论文元数据与文本块、重启状态、最终策略树、审查日志和审查报告，也向受信任的 Host 消费者提供三项标准成果的有界读取。对未变化的持久状态重复导出时，服务会原子替换完整文件并生成相同字节。
 
 ## 目录
 
@@ -37,7 +37,7 @@ kind: "package-reference"
 |---|---|---|
 | `root` | 必填 | 拥有生成后 `runs/` 目录树的绝对工作区路径。 |
 
-生成的[配置目录](../../../docs/config-catalog.zh.md#deepseek-aidsh-supramas-artifacts)是全部可接受字段的权威来源。`syncTask()` 和 `syncPaper()` 在执行中更新工作文件；`syncCompleted()` 写入完整最终契约；`outputStatus()` 只返回稳定成果名称和就绪状态。
+生成的[配置目录](../../../docs/config-catalog.zh.md#deepseek-aidsh-supramas-artifacts)是全部可接受字段的权威来源。`syncTask()` 和 `syncPaper()` 在执行中更新工作文件；`syncCompleted()` 写入完整最终契约；`outputStatus()` 只返回稳定成果名称和就绪状态；`readOutput()` 只接受这些标准名称，并在调用方指定的大小上限内返回完整 UTF-8 文件。
 
 -----
 
@@ -47,7 +47,7 @@ kind: "package-reference"
 <details>
 <summary>实现内部细节 — 点击展开</summary>
 
-`SupraMasArtifacts` 从 `ctx.supramas` 读取经过校验的独立状态，渲染专用 Stage 1 YAML/JSON/JSONL/Markdown 格式，并把每条解析后的路径限制在配置根目录内。串行操作队列防止并发导出交错，共享原子写入工具负责发布完整文件。
+`SupraMasArtifacts` 从 `ctx.supramas` 读取经过校验的独立状态，渲染专用 Stage 1 YAML/JSON/JSONL/Markdown 格式，并把每条解析后的路径限制在配置根目录内。串行操作队列防止并发导出交错，共享原子写入工具负责发布完整文件。成果读取使用固定名称、有界文件句柄和增长检查，因此不会把截断文件误当成完整内容返回。
 
 </details>
 
@@ -77,6 +77,7 @@ kind: "package-reference"
 
 - 本包导出已存元数据和文本块，不获取或解析 PDF。
 - 最终导出要求每篇已接受论文都存在于持久化的逐运行证据目录中。
+- `readOutput()` 会拒绝超过请求上限的文件，而不是流式返回或返回部分内容。
 - 渲染器实现 SupraMAS Stage 1 契约，不是通用 YAML 序列化服务。
 
 <a id="dev-note"></a>

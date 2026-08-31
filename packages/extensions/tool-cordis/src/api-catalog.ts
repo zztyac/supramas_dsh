@@ -2430,6 +2430,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'the three stable final output names in contract order.',
       },
       {
+        signature: 'async readOutput(id: SupraMasRunIdBrand, name: Stage1OutputName, maxBytes: number): Promise<Uint8Array>',
+        description: 'Read one canonical completed output through a caller-supplied complete byte bound. The fixed output-name vocabulary prevents this method from becoming a filesystem read primitive.',
+        parameters: [{ name: 'id', description: 'Owning durable run identity.' }, { name: 'name', description: 'One closed canonical output basename.' }, { name: 'maxBytes', description: 'Maximum complete payload size, capped again by the service.' }],
+        returns: 'detached exact output bytes.',
+      },
+      {
         signature: 'syncCompleted(id: SupraMasRunIdBrand): Promise<Stage1ArtifactManifest>',
         description: 'Idempotently materialize every compatibility artifact for a completed run.',
         parameters: [{ name: 'id', description: 'Owning durable completed run identity.' }],
@@ -2455,10 +2461,34 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'the current versioned task view.',
       },
       {
+        signature: '@Remote tree(runId: string): Promise<SupraMasStrategyTreeViewV1>',
+        description: 'Read the current accepted Stage 1 tree without exposing pending candidates or Host paths.',
+        parameters: [{ name: 'runId', description: 'Stable public run identity.' }],
+        returns: 'accepted nodes and edges at the exact durable revision.',
+      },
+      {
+        signature: '@Remote paper(runId: string, paperId: string): Promise<SupraMasPaperEvidenceViewV1>',
+        description: 'List text-free local evidence chunks for one run-local paper.',
+        parameters: [{ name: 'runId', description: 'Stable public run identity.' }, { name: 'paperId', description: 'Stable paper identity selected from the accepted tree.' }],
+        returns: 'paper metadata and bounded chunk summaries without local paths or chunk text.',
+      },
+      {
+        signature: '@Remote evidence( runId: string, paperId: string, chunkId: string, start: number, maxCharacters: number, ): Promise<SupraMasEvidenceSliceViewV1>',
+        description: 'Read one bounded text slice from an identified run-local evidence chunk.',
+        parameters: [{ name: 'runId', description: 'Stable public run identity.' }, { name: 'paperId', description: 'Owning paper identity.' }, { name: 'chunkId', description: 'Exact local evidence chunk identity.' }, { name: 'start', description: 'Zero-based character offset.' }, { name: 'maxCharacters', description: 'Complete response character bound, at most 8,000.' }],
+        returns: 'one detached evidence slice with explicit range metadata.',
+      },
+      {
         signature: '@Remote async artifacts(runId: string): Promise<SupraMasArtifactsViewV1>',
         description: 'Read the browser-safe readiness of the three canonical Stage 1 outputs.',
         parameters: [{ name: 'runId', description: 'Stable public run identity.' }],
         returns: 'fixed output names and readiness without Host paths.',
+      },
+      {
+        signature: '@Remote async artifact(runId: string, name: SupraMasOutputNameV1): Promise<SupraMasArtifactContentV1>',
+        description: 'Read one bounded canonical Stage 1 output for browser download.',
+        parameters: [{ name: 'runId', description: 'Stable public run identity.' }, { name: 'name', description: 'One closed canonical output basename.' }],
+        returns: 'complete UTF-8 content and media metadata without a Host path.',
       },
       {
         signature: '@Remote async createStage1(request: SupraMasCreateStage1RequestV1): Promise<SupraMasRunViewV1>',
@@ -5738,8 +5768,12 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type Stage1NextAction = {\n    kind: \'build_root\';\n    attempt_index: number;\n} | {\n    kind: \'build_child\';\n    parent_node_id: string;\n    parent_limitation_id: string;\n    parent_expectation: string;\n    attempt_index: number;\n    prior_attempts: Stage1BuilderAttempt[];\n} | {\n    kind: \'review_candidate\';\n    scope: \'root\' | \'child\';\n    attempt_index: number;\n    revision_round: number;\n    paper_id: string;\n} | {\n    kind: \'revise_candidate\';\n    scope: \'root\' | \'child\';\n    attempt_index: number;\n    revision_round: number;\n    paper_id: string;\n    critical_issues: Stage1ReviewFinding[];\n    edge_issues: Stage1ReviewFinding[];\n    acceptance_conditions: string[];\n} | {\n    kind: \'finalize\';\n} | {\n    kind: \'completed\';\n    tree: StrategyTree;\n} | {\n    kind: \'failed\';\n    reason: string;\n};',
   },
   {
+    name: 'Stage1OutputName',
+    declaration: 'export type Stage1OutputName = typeof STAGE1_OUTPUT_NAMES[number];',
+  },
+  {
     name: 'Stage1OutputStatus',
-    declaration: 'export interface Stage1OutputStatus {\n    name: \'strategy_tree.json\' | \'node_review_log.jsonl\' | \'review_report.md\';\n    ready: boolean;\n}',
+    declaration: 'export interface Stage1OutputStatus {\n    name: Stage1OutputName;\n    ready: boolean;\n}',
   },
   {
     name: 'Stage1PendingCandidate',
@@ -5958,6 +5992,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface SubprocessTerminalSpawnSpec {\n    argv: readonly string[];\n    cwd: string;\n    env?: Record<string, string> | undefined;\n    rows: number;\n    cols: number;\n    graceMs: number;\n    signal?: AbortSignal | undefined;\n}',
   },
   {
+    name: 'SupraMasArtifactContentV1',
+    declaration: 'export interface SupraMasArtifactContentV1 {\n    readonly apiVersion: typeof SUPRAMAS_API_VERSION;\n    readonly runId: string;\n    readonly name: SupraMasOutputNameV1;\n    readonly mediaType: \'application/json\' | \'application/x-ndjson\' | \'text/markdown\';\n    readonly byteLength: number;\n    readonly content: string;\n}',
+  },
+  {
     name: 'SupraMasArtifactsViewV1',
     declaration: 'export interface SupraMasArtifactsViewV1 {\n    readonly apiVersion: typeof SUPRAMAS_API_VERSION;\n    readonly runId: string;\n    readonly ready: boolean;\n    readonly files: readonly SupraMasOutputFileV1[];\n}',
   },
@@ -5966,12 +6004,40 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface SupraMasCreateStage1RequestV1 {\n    readonly jobId?: string;\n    readonly researchTopic: string;\n    readonly materialScope?: readonly string[];\n    readonly targetProperty?: readonly string[];\n    readonly evidencePolicy?: string;\n    readonly include?: readonly string[];\n    readonly exclude?: readonly string[];\n    readonly maxDepth?: number;\n    readonly maxRootAttempts?: number;\n    readonly maxChildAttemptsPerLimitation?: number;\n    readonly maxBranchPerNode?: number | null;\n    readonly targetChildNodes?: number | null;\n}',
   },
   {
+    name: 'SupraMasEdgeTypeV1',
+    declaration: 'export type SupraMasEdgeTypeV1 = \'direct\' | \'transferable\' | \'exploratory\';',
+  },
+  {
+    name: 'SupraMasEvidenceChunkSummaryV1',
+    declaration: 'export interface SupraMasEvidenceChunkSummaryV1 {\n    readonly chunkId: string;\n    readonly page: number | null;\n    readonly characters: number;\n}',
+  },
+  {
+    name: 'SupraMasEvidenceRefV1',
+    declaration: 'export interface SupraMasEvidenceRefV1 {\n    readonly chunkId: string;\n    readonly page: number | null;\n    readonly evidenceText: string;\n}',
+  },
+  {
+    name: 'SupraMasEvidenceSliceViewV1',
+    declaration: 'export interface SupraMasEvidenceSliceViewV1 {\n    readonly apiVersion: typeof SUPRAMAS_API_VERSION;\n    readonly runId: string;\n    readonly paperId: string;\n    readonly chunkId: string;\n    readonly page: number | null;\n    readonly start: number;\n    readonly end: number;\n    readonly totalCharacters: number;\n    readonly text: string;\n}',
+  },
+  {
+    name: 'SupraMasLimitationRecordV1',
+    declaration: 'export interface SupraMasLimitationRecordV1 {\n    readonly limitationId: string;\n    readonly limitation: string;\n    readonly expectation: string;\n    readonly relatedRecordIds: readonly string[];\n    readonly evidence: SupraMasEvidenceRefV1;\n    readonly confidence: number;\n}',
+  },
+  {
     name: 'SupraMasNextActionV1',
     declaration: 'export type SupraMasNextActionV1 = {\n    readonly kind: \'build_root\';\n    readonly attemptIndex: number;\n} | {\n    readonly kind: \'build_child\';\n    readonly parentNodeId: string;\n    readonly parentLimitationId: string;\n    readonly parentExpectation: string;\n    readonly attemptIndex: number;\n} | {\n    readonly kind: \'review_candidate\';\n    readonly scope: \'root\' | \'child\';\n    readonly attemptIndex: number;\n    readonly revisionRound: number;\n    readonly paperId: string;\n} | {\n    readonly kind: \'revise_candidate\';\n    readonly scope: \'root\' | \'child\';\n    readonly attemptIndex: number;\n    readonly revisionRound: number;\n    readonly paperId: string;\n    readonly criticalIssueCount: number;\n    readonly edgeIssueCount: number;\n    readonly acceptanceConditionCount: number;\n} | {\n    readonly kind: \'finalize\';\n} | {\n    readonly kind: \'completed\';\n} | {\n    readonly kind: \'failed\';\n    readonly reason: string;\n};',
   },
   {
     name: 'SupraMasOutputFileV1',
-    declaration: 'export interface SupraMasOutputFileV1 {\n    readonly name: \'strategy_tree.json\' | \'node_review_log.jsonl\' | \'review_report.md\';\n    readonly ready: boolean;\n}',
+    declaration: 'export interface SupraMasOutputFileV1 {\n    readonly name: SupraMasOutputNameV1;\n    readonly ready: boolean;\n}',
+  },
+  {
+    name: 'SupraMasOutputNameV1',
+    declaration: 'export type SupraMasOutputNameV1 = \'strategy_tree.json\' | \'node_review_log.jsonl\' | \'review_report.md\';',
+  },
+  {
+    name: 'SupraMasPaperEvidenceViewV1',
+    declaration: 'export interface SupraMasPaperEvidenceViewV1 {\n    readonly apiVersion: typeof SUPRAMAS_API_VERSION;\n    readonly runId: string;\n    readonly paperId: string;\n    readonly paperTitle: string;\n    readonly sourceType: SupraMasSourceTypeV1;\n    readonly chunks: readonly SupraMasEvidenceChunkSummaryV1[];\n}',
   },
   {
     name: 'SupraMasRunFailureViewV1',
@@ -6002,6 +6068,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface SupraMasRunViewV1 {\n    readonly apiVersion: typeof SUPRAMAS_API_VERSION;\n    readonly run: SupraMasRunSummaryV1;\n    readonly stage1?: SupraMasStage1ViewV1;\n}',
   },
   {
+    name: 'SupraMasSourceTypeV1',
+    declaration: 'export type SupraMasSourceTypeV1 = \'experimental\' | \'review\' | \'theory\' | \'dataset\' | \'unknown\';',
+  },
+  {
     name: 'SupraMasStage1LimitsV1',
     declaration: 'export interface SupraMasStage1LimitsV1 {\n    readonly maxDepth: number;\n    readonly maxRootAttempts: number;\n    readonly maxChildAttemptsPerLimitation: number;\n    readonly maxBranchPerNode: number | null;\n    readonly targetChildNodes: number | null;\n}',
   },
@@ -6012,6 +6082,26 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'SupraMasStage1ViewV1',
     declaration: 'export interface SupraMasStage1ViewV1 {\n    readonly status: \'active\' | \'ready_to_finalize\' | \'completed\' | \'failed\';\n    readonly researchTopic: string;\n    readonly materialScope: readonly string[];\n    readonly targetProperty: readonly string[];\n    readonly limits: SupraMasStage1LimitsV1;\n    readonly progress: SupraMasStage1ProgressV1;\n    readonly nextAction: SupraMasNextActionV1;\n}',
+  },
+  {
+    name: 'SupraMasStrategyRecordV1',
+    declaration: 'export interface SupraMasStrategyRecordV1 {\n    readonly recordId: string;\n    readonly tuningDimension: SupraMasTuningDimensionV1;\n    readonly tuningStrategy: string;\n    readonly tuningEffect: string;\n    readonly evidence: SupraMasEvidenceRefV1;\n    readonly confidence: number;\n}',
+  },
+  {
+    name: 'SupraMasStrategyTreeViewV1',
+    declaration: 'export interface SupraMasStrategyTreeViewV1 {\n    readonly apiVersion: typeof SUPRAMAS_API_VERSION;\n    readonly runId: string;\n    readonly revision: number;\n    readonly status: SupraMasStage1ViewV1[\'status\'];\n    readonly nodes: readonly SupraMasTreeNodeV1[];\n    readonly edges: readonly SupraMasTreeEdgeV1[];\n}',
+  },
+  {
+    name: 'SupraMasTreeEdgeV1',
+    declaration: 'export interface SupraMasTreeEdgeV1 {\n    readonly edgeId: string | null;\n    readonly parentNodeId: string;\n    readonly parentLimitationId: string;\n    readonly childNodeId: string;\n    readonly childRecordId: string | null;\n    readonly parentExpectation: string;\n    readonly childTuningEffect: string | null;\n    readonly edgeType: SupraMasEdgeTypeV1;\n    readonly edgeRationale: string;\n    readonly confidence: number;\n}',
+  },
+  {
+    name: 'SupraMasTreeNodeV1',
+    declaration: 'export interface SupraMasTreeNodeV1 {\n    readonly nodeId: string;\n    readonly level: number;\n    readonly parentId: string | null;\n    readonly paperId: string;\n    readonly paperTitle: string;\n    readonly year: number | null;\n    readonly doi: string | null;\n    readonly url: string | null;\n    readonly sourceType: SupraMasSourceTypeV1 | null;\n    readonly notes: readonly string[];\n    readonly strategyRecords: readonly SupraMasStrategyRecordV1[];\n    readonly limitationRecords: readonly SupraMasLimitationRecordV1[];\n}',
+  },
+  {
+    name: 'SupraMasTuningDimensionV1',
+    declaration: 'export type SupraMasTuningDimensionV1 = \'Composition tuning\' | \'Grain boundary tuning\' | \'Interface tuning\' | \'Texture tuning\' | \'Stress tuning\';',
   },
   {
     name: 'SurfaceEvent',

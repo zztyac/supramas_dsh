@@ -73,6 +73,67 @@ const request = {
   maxDepth: 2,
 }
 
+const evidenceText = 'BZO additions improve in-field Jc, but only one loading was measured.'
+
+async function completedRun(controller: SupraMasController, ctx: Context) {
+  const created = await controller.createStage1({
+    ...request,
+    jobId: 'ui-completed-demo',
+    maxDepth: 0,
+  })
+  await ctx.supramas.importPaper(SupraMasRunId(created.run.id), {
+    metadata: {
+      paper_id: 'paper-1',
+      paper_title: 'BZO pinning paper',
+      local_path: 'runs/ui-completed-demo/papers/paper-1.json',
+      source_type: 'experimental',
+    },
+    chunks: [{ chunk_id: 'paper-1-c1', page: 7, text: evidenceText }],
+  })
+  const built = await ctx.supramas.submitStage1Builder({
+    id: SupraMasRunId(created.run.id),
+    revision: created.run.revision,
+  }, {
+    paper_node: {
+      paper_id: 'paper-1',
+      paper_title: 'BZO pinning paper',
+      year: 2024,
+      doi: '10.0000/bzo-demo',
+      url: 'https://example.invalid/paper-1',
+      source_type: 'experimental',
+      notes: ['Accepted from full-text evidence.'],
+      strategy_records: [{
+        record_id: 'R1',
+        tuning_dimension: 'Composition tuning',
+        tuning_strategy: 'Add BZO artificial pinning centers.',
+        tuning_effect: 'BZO additions improve in-field Jc.',
+        evidence: { chunk_id: 'paper-1-c1', page: 7, evidence_text: 'BZO additions improve in-field Jc' },
+        confidence: 0.9,
+      }],
+      limitation_records: [{
+        limitation_id: 'L1',
+        limitation: 'Only one loading was measured.',
+        expectation: 'Compare multiple BZO loadings.',
+        related_record_ids: ['R1'],
+        evidence: { chunk_id: 'paper-1-c1', page: 7, evidence_text: 'only one loading was measured' },
+        confidence: 0.8,
+      }],
+    },
+    edge: null,
+    notes: [],
+  })
+  const accepted = await ctx.supramas.submitStage1Review(built.run, {
+    decision: 'accept',
+    summary: 'The local full text supports the node.',
+    critical_issues: [],
+    edge_issues: [],
+    acceptance_conditions: [],
+  })
+  const completed = await ctx.supramas.finalizeStage1(accepted.run)
+  await ctx.supramasArtifacts.syncCompleted(completed.run.id)
+  return completed
+}
+
 describe('SupraMAS Remote contract', () => {
   it('publishes one versioned namespace with the complete task control surface', async () => {
     const { controller } = await harness()
@@ -83,7 +144,11 @@ describe('SupraMAS Remote contract', () => {
     expect(remoteMethods(controller)).toEqual([
       { method: 'list', invocation: { kind: 'direct' } },
       { method: 'get', invocation: { kind: 'direct' } },
+      { method: 'tree', invocation: { kind: 'direct' } },
+      { method: 'paper', invocation: { kind: 'direct' } },
+      { method: 'evidence', invocation: { kind: 'direct' } },
       { method: 'artifacts', invocation: { kind: 'direct' } },
+      { method: 'artifact', invocation: { kind: 'direct' } },
       { method: 'createStage1', invocation: { kind: 'direct' } },
       { method: 'resume', invocation: { kind: 'direct' } },
       { method: 'cancel', invocation: { kind: 'direct' } },
@@ -108,6 +173,104 @@ describe('SupraMAS Remote contract', () => {
     expect(serialized).not.toContain(artifactRoot)
     await expect(controller.artifacts('supramas:missing')).rejects.toMatchObject({
       failure: { code: 'supramas-run-not-found' },
+    })
+  })
+
+  it('projects the accepted strategy tree and browser-safe paper chunk metadata', async () => {
+    const { controller, ctx, artifactRoot } = await harness()
+    const completed = await completedRun(controller, ctx)
+
+    const tree = await controller.tree(completed.run.id)
+    expect(tree).toMatchObject({
+      apiVersion: 1,
+      runId: completed.run.id,
+      revision: completed.run.revision,
+      status: 'completed',
+      nodes: [{
+        nodeId: 'N0',
+        level: 0,
+        parentId: null,
+        paperId: 'paper-1',
+        paperTitle: 'BZO pinning paper',
+        year: 2024,
+        strategyRecords: [{
+          recordId: 'R1',
+          tuningDimension: 'Composition tuning',
+          evidence: { chunkId: 'paper-1-c1', page: 7 },
+        }],
+        limitationRecords: [{
+          limitationId: 'L1',
+          expectation: 'Compare multiple BZO loadings.',
+          relatedRecordIds: ['R1'],
+        }],
+      }],
+      edges: [],
+    })
+    expect(JSON.stringify(tree)).not.toContain(artifactRoot)
+    expect(JSON.stringify(tree)).not.toContain('local_path')
+
+    const paper = await controller.paper(completed.run.id, 'paper-1')
+    expect(paper).toEqual({
+      apiVersion: 1,
+      runId: completed.run.id,
+      paperId: 'paper-1',
+      paperTitle: 'BZO pinning paper',
+      sourceType: 'experimental',
+      chunks: [{ chunkId: 'paper-1-c1', page: 7, characters: evidenceText.length }],
+    })
+    expect(JSON.stringify(paper)).not.toContain(evidenceText)
+    expect(JSON.stringify(paper)).not.toContain(artifactRoot)
+  })
+
+  it('returns one bounded evidence slice and one canonical artifact payload', async () => {
+    const { controller, ctx } = await harness()
+    const completed = await completedRun(controller, ctx)
+
+    await expect(controller.evidence(completed.run.id, 'paper-1', 'paper-1-c1', 4, 12)).resolves.toEqual({
+      apiVersion: 1,
+      runId: completed.run.id,
+      paperId: 'paper-1',
+      chunkId: 'paper-1-c1',
+      page: 7,
+      start: 4,
+      end: 16,
+      totalCharacters: evidenceText.length,
+      text: evidenceText.slice(4, 16),
+    })
+
+    const artifact = await controller.artifact(completed.run.id, 'strategy_tree.json')
+    expect(artifact).toMatchObject({
+      apiVersion: 1,
+      runId: completed.run.id,
+      name: 'strategy_tree.json',
+      mediaType: 'application/json',
+    })
+    expect(artifact.content).toContain('"job_id": "ui-completed-demo"')
+    expect(artifact.byteLength).toBe(new TextEncoder().encode(artifact.content).byteLength)
+  })
+
+  it('classifies invalid evidence and artifact reads without leaking paths', async () => {
+    const { controller, ctx } = await harness()
+    const active = await controller.createStage1({ ...request, jobId: 'ui-read-errors' })
+    const completed = await completedRun(controller, ctx)
+
+    await expect(controller.paper(completed.run.id, 'missing')).rejects.toMatchObject({
+      failure: { code: 'supramas-paper-not-found', details: { runId: completed.run.id, paperId: 'missing' } },
+    })
+    await expect(controller.evidence(completed.run.id, 'paper-1', 'missing', 0, 10)).rejects.toMatchObject({
+      failure: { code: 'supramas-chunk-not-found', details: { paperId: 'paper-1', chunkId: 'missing' } },
+    })
+    await expect(controller.evidence(completed.run.id, 'paper-1', 'paper-1-c1', -1, 10)).rejects.toMatchObject({
+      failure: { code: 'bad-request' },
+    })
+    await expect(controller.evidence(completed.run.id, 'paper-1', 'paper-1-c1', 0, 8_001)).rejects.toMatchObject({
+      failure: { code: 'bad-request' },
+    })
+    await expect(controller.artifact(active.run.id, 'strategy_tree.json')).rejects.toMatchObject({
+      failure: { code: 'supramas-artifact-not-ready', details: { runId: active.run.id } },
+    })
+    await expect(controller.artifact(completed.run.id, '../tree_state.json' as never)).rejects.toMatchObject({
+      failure: { code: 'bad-request' },
     })
   })
 
