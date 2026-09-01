@@ -1,4 +1,8 @@
 # SupraMAS is a host capability extension; model tools mount only inside the SupraMAS preset.
+- id: agent-presets
+  config:
+    default: supramas
+
 - insert:
     - id: supramas-runtime
       name: '@deepseek-ai/dsh-supramas'

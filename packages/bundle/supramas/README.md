@@ -51,7 +51,7 @@ pnpm run test:supramas
 pnpm dsh web --patch packages/bundle/supramas/cordis.patch.yml
 ```
 
-Open `http://127.0.0.1:3080`, select the **SupraMAS** preset, and use **Material tasks**. `pnpm run verify:supramas` is the slower pre-release check that regenerates Host contracts, typechecks the browser face, and runs the complete SupraMAS package suite.
+Open `http://127.0.0.1:3080` and use **Material tasks**. This bundle makes **SupraMAS** the default preset for newly created sessions, while keeping the other presets selectable. Existing sessions retain the preset they were created with; create a new session if its header says **Standard**. `pnpm run verify:supramas` is the slower pre-release check that regenerates Host contracts, typechecks the browser face, and runs the complete SupraMAS package suite.
 
 ## Upgrade a source checkout
 

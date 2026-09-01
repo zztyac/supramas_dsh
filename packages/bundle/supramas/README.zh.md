@@ -55,7 +55,7 @@ pnpm run test:supramas
 pnpm dsh web --patch packages/bundle/supramas/cordis.patch.yml
 ```
 
-打开 `http://127.0.0.1:3080`，选择 **SupraMAS** 预设，再进入 **材料任务**。`pnpm run verify:supramas` 是较慢的发布前检查：它会重新生成 Host 契约、对浏览器 face 做类型检查，并运行完整 SupraMAS 包测试。
+打开 `http://127.0.0.1:3080`，进入 **材料任务**。本 bundle 会把新建会话的默认预设设为 **SupraMAS**，同时保留其他预设供手动选择。已有会话会保留创建时的预设；如果标题显示 **Standard**，请新建会话。`pnpm run verify:supramas` 是较慢的发布前检查：它会重新生成 Host 契约、对浏览器 face 做类型检查，并运行完整 SupraMAS 包测试。
 
 <a id="upgrade-a-source-checkout"></a>
 

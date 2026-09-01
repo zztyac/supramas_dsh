@@ -6,7 +6,7 @@ import * as yaml from 'js-yaml'
 import { entryListSchema } from '@deepseek-ai/cordis-plugin-include'
 
 describe('dsh-supramas bundle', () => {
-  it('declares a parseable host Profile patch without leaking model tools to standard sessions', () => {
+  it('defaults new sessions to the scoped SupraMAS preset without leaking model tools to the host', () => {
     const root = fileURLToPath(new URL('..', import.meta.url))
     const manifest = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')) as {
       dependencies?: Record<string, string>
@@ -16,7 +16,8 @@ describe('dsh-supramas bundle', () => {
     const parsed = yaml.load(
       readFileSync(resolve(root, manifest.dsh!.bundle!.patch!), 'utf8'),
       { schema: entryListSchema },
-    ) as { insert?: { id?: string; name?: string }[] }[]
+    ) as { id?: string; config?: Record<string, unknown>; insert?: { id?: string; name?: string }[] }[]
+    expect(parsed[0]).toEqual({ id: 'agent-presets', config: { default: 'supramas' } })
     const rows = parsed.flatMap(patch => patch.insert ?? [])
     expect(rows).toEqual([
       { id: 'supramas-runtime', name: '@deepseek-ai/dsh-supramas' },
