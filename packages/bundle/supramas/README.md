@@ -44,6 +44,7 @@ cd supramas_dsh
 corepack enable
 pnpm install --frozen-lockfile
 python -m pip install pypdf
+pnpm run migrate:supramas-storage
 pnpm run build
 pnpm run build:web
 pnpm run test:supramas
@@ -62,10 +63,13 @@ git pull --ff-only origin feat/supramas-platform
 corepack enable
 pnpm install --frozen-lockfile
 python -m pip install --upgrade pypdf
+pnpm run migrate:supramas-storage
 pnpm run build
 pnpm run build:web
 pnpm run verify:supramas
 ```
+
+The storage migration is idempotent. When a legacy version 1 SupraMAS store exists, it first creates a timestamped `.bak` copy and then upgrades the document atomically. Legacy abstract evidence remains labelled as abstract evidence, and the migration does not invent PDF provenance or subagent handoff identifiers.
 
 Restart the Web command after the checks pass. Durable workflow state remains authoritative; completed compatibility outputs can be regenerated idempotently.
 

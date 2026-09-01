@@ -48,6 +48,7 @@ cd supramas_dsh
 corepack enable
 pnpm install --frozen-lockfile
 python -m pip install pypdf
+pnpm run migrate:supramas-storage
 pnpm run build
 pnpm run build:web
 pnpm run test:supramas
@@ -68,10 +69,13 @@ git pull --ff-only origin feat/supramas-platform
 corepack enable
 pnpm install --frozen-lockfile
 python -m pip install --upgrade pypdf
+pnpm run migrate:supramas-storage
 pnpm run build
 pnpm run build:web
 pnpm run verify:supramas
 ```
+
+存储迁移可以重复执行。检测到旧版 v1 SupraMAS 存储时，命令会先创建带时间戳的 `.bak` 备份，再以原子方式升级数据。旧版摘要证据仍明确标记为摘要证据；迁移不会虚构 PDF 来源或子智能体交接标识。
 
 检查通过后重启 Web 命令。持久工作流状态仍是权威来源；已完成的兼容成果可以幂等地重新生成。
 
