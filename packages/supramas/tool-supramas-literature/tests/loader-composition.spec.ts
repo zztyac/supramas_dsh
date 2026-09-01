@@ -103,7 +103,7 @@ describe('SupraMAS literature real Loader composition', () => {
     await ctx.loader.await()
 
     expect(ctx.supramas.list()).toEqual([])
-    expect(ctx.tools.schemas()).toHaveLength(18)
+    expect(ctx.tools.schemas()).toHaveLength(15)
     expect(ctx.tools.schemas().map(schema => schema.name)).toContain('supramas_literature_search')
     expect(ctx.tools.schemas().map(schema => schema.name)).toContain('supramas_paper_import')
     expect(ctx.supramasLiterature).toBeDefined()

@@ -157,6 +157,8 @@ describe('SupraMasRuntime', () => {
     const ctx = await setup()
     expect(() => ctx.supramas.readPaper(SupraMasRunId('supramas:missing'), 'paper'))
       .toThrow(expect.objectContaining({ code: 'SUPRAMAS_RUN_NOT_FOUND' }))
+    expect(() => ctx.supramas.listPapers(SupraMasRunId('supramas:missing')))
+      .toThrow(expect.objectContaining({ code: 'SUPRAMAS_RUN_NOT_FOUND' }))
 
     const created = await ctx.supramas.create(request)
     const internals = ctx.supramas as unknown as { evidence: Map<string, unknown> }
@@ -205,8 +207,8 @@ describe('SupraMasRuntime', () => {
     await expect(ctx.supramas.importPaper(created.id, {
       metadata,
       chunks: [
-        { chunk_id: 'paper-atomic-p1-c1', page: 1, text: 'first page evidence' },
-        { chunk_id: 'paper-atomic-p1-c1', page: 2, text: 'duplicate id must fail' },
+        { chunk_id: 'paper-atomic-p1-c1', page: 1, text: 'first page evidence', evidence_kind: 'abstract' },
+        { chunk_id: 'paper-atomic-p1-c1', page: 2, text: 'duplicate id must fail', evidence_kind: 'abstract' },
       ],
     })).rejects.toThrow(expect.objectContaining({ code: 'SUPRAMAS_DUPLICATE_ID' }))
     expect(ctx.supramas.readPaper(created.id, metadata.paper_id)).toBeUndefined()
@@ -214,11 +216,17 @@ describe('SupraMasRuntime', () => {
     const imported = await ctx.supramas.importPaper(created.id, {
       metadata,
       chunks: [
-        { chunk_id: 'paper-atomic-p1-c1', page: 1, text: 'first page evidence' },
-        { chunk_id: 'paper-atomic-p2-c1', page: 2, text: 'second page evidence' },
+        { chunk_id: 'paper-atomic-p1-c1', page: 1, text: 'first page evidence', evidence_kind: 'abstract' },
+        { chunk_id: 'paper-atomic-p2-c1', page: 2, text: 'second page evidence', evidence_kind: 'abstract' },
       ],
     })
     expect(imported.chunks).toHaveLength(2)
+    expect(ctx.supramas.readPaper(created.id, metadata.paper_id)).toEqual(imported)
+    const listed = ctx.supramas.listPapers(created.id)
+    expect(listed).toEqual([imported])
+    const listedPaper = listed[0]
+    if (listedPaper === undefined) throw new Error('expected imported paper')
+    listedPaper.paper_title = 'mutated detached paper'
     expect(ctx.supramas.readPaper(created.id, metadata.paper_id)).toEqual(imported)
   })
 

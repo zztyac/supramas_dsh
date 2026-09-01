@@ -79,7 +79,7 @@ interface Bench {
   }
 }
 
-async function bench(withSession = true): Promise<Bench> {
+async function bench(withSession = true, agentPreset = 'supramas'): Promise<Bench> {
   const ctx = new Context()
   await ctx.plugin(SlotRegistry).await()
   ctx.slots.register({
@@ -91,7 +91,12 @@ async function bench(withSession = true): Promise<Bench> {
 
   const prompt = vi.fn().mockResolvedValue({ ok: true })
   const sessions = {
-    list: { getSnapshot: () => ({ current: withSession ? 'session-1' : undefined }) },
+    list: { getSnapshot: () => ({
+      current: withSession ? 'session-1' : undefined,
+      byId: withSession
+        ? { 'session-1': { projectionValues: { agentPreset } } }
+        : {},
+    }) },
     binding: () => ({ session: { prompt } }),
   }
   const ok = <T>(value: T) => Promise.resolve({ ok: true, value })
@@ -184,6 +189,16 @@ describe('SupraMAS browser plugin', () => {
     expect(created.view).toEqual(view)
     expect(created.queued).toBe(false)
     expect(created.warning).toBe(zh['notice.noSession'])
+    expect(b.prompt).not.toHaveBeenCalled()
+    await b.fiber.dispose()
+  })
+
+  it('refuses to queue a material task into a non-SupraMAS session', async () => {
+    const b = await bench(true, 'standard')
+    await expect(b.api.queue(view)).resolves.toEqual({
+      queued: false,
+      warning: zh['notice.wrongPreset'],
+    })
     expect(b.prompt).not.toHaveBeenCalled()
     await b.fiber.dispose()
   })

@@ -11,6 +11,7 @@ import {
   submitStage1Review as applyReviewSubmission,
   validateStage1Workflow,
   type EvidenceChunk,
+  type EvidenceChunkInput,
   type EvidenceRef,
   type EvidenceVerification,
   type PaperArtifact,
@@ -40,6 +41,7 @@ export type * from './roles.ts'
 export {
   supraMasDomainSpec,
   supraMasEvidenceChunk,
+  supraMasFullTextSource,
   supraMasPaperArtifact,
   supraMasRunFailure,
   supraMasRunRecord,
@@ -185,12 +187,14 @@ function catalogFromRecord(record: SupraMasRunRecord): EvidenceCatalog {
       paper_title: paper.paper_title,
       local_path: paper.local_path,
       source_type: paper.source_type,
+      ...(paper.full_text_source === undefined ? {} : { full_text_source: paper.full_text_source }),
     })
     for (const chunk of paper.chunks) {
       catalog.addChunk(paper.paper_id, {
         chunk_id: chunk.chunk_id,
         text: chunk.text,
         ...(chunk.page === undefined ? {} : { page: chunk.page }),
+        evidence_kind: chunk.evidence_kind,
       })
     }
   }
@@ -360,7 +364,7 @@ export class SupraMasRuntime extends Service {
   /**
    * Register one canonical paper artifact under a run.
    * @param id - Stable owning run identity.
-   * @param metadata - Canonical run-local paper metadata.
+   * @param metadata - Canonical run-local paper metadata, including durable full-text provenance when acquired.
    * @returns a detached empty artifact.
    */
   storePaper(id: SupraMasRunIdBrand, metadata: PaperArtifactMetadata): Promise<PaperArtifact> {
@@ -382,7 +386,7 @@ export class SupraMasRuntime extends Service {
   }
 
   /**
-   * Validate and persist one paper plus all of its page-aware chunks as one storage mutation.
+   * Validate and persist one paper plus all of its provenance-classified page-aware chunks as one storage mutation.
    * Any invalid metadata or chunk fails before the durable record and process catalog change.
    * @param id - Stable owning run identity.
    * @param request - Complete paper metadata and extracted chunk set.
@@ -410,13 +414,13 @@ export class SupraMasRuntime extends Service {
   }
 
   /**
-   * Add one provenance-bound chunk to a stored paper.
+   * Add one provenance-bound chunk to a stored paper; omitted evidence kind is stored fail-closed as abstract.
    * @param id - Stable owning run identity.
    * @param paperId - Owning paper identity.
-   * @param chunk - Local page-aware evidence text.
+   * @param chunk - Local page-aware evidence text and optional provenance class.
    * @returns a detached stored chunk.
    */
-  addEvidenceChunk(id: SupraMasRunIdBrand, paperId: string, chunk: EvidenceChunk): Promise<EvidenceChunk> {
+  addEvidenceChunk(id: SupraMasRunIdBrand, paperId: string, chunk: EvidenceChunkInput): Promise<EvidenceChunk> {
     return this.enqueue(async () => {
       const table = this.requireTable()
       const current = table.get(id)
@@ -447,11 +451,20 @@ export class SupraMasRuntime extends Service {
   }
 
   /**
+   * List detached local paper artifacts available to one run.
+   * @param id - Stable owning run identity.
+   * @returns papers in their stable import order.
+   */
+  listPapers(id: SupraMasRunIdBrand): PaperArtifact[] {
+    return this.evidenceFor(id).listPapers()
+  }
+
+  /**
    * Verify one evidence quote against run-local paper chunks.
    * @param id - Stable owning run identity.
    * @param paperId - Expected owning paper.
    * @param evidence - Chunk, page, and exact evidence quote.
-   * @returns stable verified provenance.
+   * @returns stable verified provenance including the persisted evidence kind.
    */
   verifyEvidence(id: SupraMasRunIdBrand, paperId: string, evidence: EvidenceRef): EvidenceVerification {
     return this.evidenceFor(id).verify(paperId, evidence)
@@ -556,7 +569,7 @@ export class SupraMasRuntime extends Service {
   }
 
   /**
-   * Persist one reviewer decision; only acceptance can add the candidate to the tree.
+   * Persist one reviewer decision; accepted child edges must match the declared expectation satisfaction.
    * @param ref - Expected current run revision.
    * @param submission - Reviewer decision and actionable findings.
    * @returns the committed workflow and its next action.

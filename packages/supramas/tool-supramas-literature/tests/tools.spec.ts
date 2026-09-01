@@ -12,6 +12,7 @@ import ToolRuntime from '@deepseek-ai/dsh-tools'
 import SupraMasRuntime from '../../supramas/src/index.ts'
 import SupraMasArtifacts from '../../supramas-artifacts/src/index.ts'
 import LiteratureRuntime, {
+  LiteratureError,
   type DocumentParserProvider,
   type LiteratureIndexProvider,
   type PaperAcquisitionProvider,
@@ -160,5 +161,23 @@ describe('SupraMAS bounded literature tools', () => {
     expect(missing.isError).toBe(false)
     if (missing.isError) throw new Error('expected error envelope')
     expect(missing.value).toMatchObject({ status: 'error', error: { code: 'SUPRAMAS_EVIDENCE_MISSING' } })
+  })
+
+  it('routes failed full-text imports to another candidate without abstract fallback', async () => {
+    const ctx = await setup()
+    vi.spyOn(ctx.supramasPaperIngest, 'importCandidate').mockRejectedValueOnce(
+      new LiteratureError('no open document', 'SUPRAMAS_LITERATURE_SOURCE_UNAVAILABLE'),
+    )
+    const failed = await call(ctx, 'supramas_paper_import', {
+      run_id: 'supramas:tools-demo', candidate_id: 'openalex:W1', source_type: 'experimental',
+    })
+    expect(failed.isError).toBe(false)
+    if (failed.isError) throw new Error('expected recovery envelope')
+    expect(failed.value).toMatchObject({
+      status: 'error',
+      next_actions: ['select_another_open_access_candidate', 'refine_literature_query'],
+      error: { code: 'SUPRAMAS_LITERATURE_SOURCE_UNAVAILABLE' },
+    })
+    expect(JSON.stringify(failed.value)).toContain('Never persist or cite a search-result abstract')
   })
 })

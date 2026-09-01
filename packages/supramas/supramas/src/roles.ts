@@ -58,7 +58,7 @@ export const ROLE_SPECS: readonly RoleSpec[] = [
     id: 'strategy-reviewer',
     purpose: 'Review one candidate and its local evidence without mutating it.',
     tools: ['supramas_chunk_list', 'supramas_chunk_read', 'supramas_evidence_verify'],
-    outputSchema: 'supramas.reviewer.v1',
+    outputSchema: 'supramas.reviewer.v2',
   },
 ] as const
 

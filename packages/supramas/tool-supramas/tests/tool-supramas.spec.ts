@@ -3,7 +3,10 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
+import type { Agent } from '@deepseek-ai/dsh-agent'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
+import { Session, SessionId } from '@deepseek-ai/dsh-session'
+import type { SubagentStartRequest } from '@deepseek-ai/dsh-subagent'
 import Storage from '@deepseek-ai/dsh-storage'
 import {
   apply as storageJsonApply,
@@ -48,7 +51,7 @@ async function setup(loadTools = true): Promise<Context> {
   await ctx.plugin(ToolRuntime)
   await ctx.plugin(SupraMasRuntime)
   await ctx.plugin(SupraMasArtifacts, { root })
-  if (loadTools) await ctx.plugin(ToolSupraMas)
+  if (loadTools) await ctx.plugin(ToolSupraMas, { mode: 'direct' })
   return ctx
 }
 
@@ -63,13 +66,19 @@ afterEach(async () => {
 })
 
 let callId = 0
-function call(ctx: Context, name: string, args: unknown) {
+function call(ctx: Context, name: string, args: unknown, agent?: Agent) {
   return ctx.tools.execute({
     signal: new AbortController().signal,
     callId: ToolCallId(`supramas-${++callId}`),
     name,
     arguments: args,
+    ...(agent === undefined ? {} : { agent }),
   })
+}
+
+function fakeAgent(id = 'supramas-parent'): Agent {
+  const sessionId = SessionId(id)
+  return { id: sessionId, options: {}, session: Session.create(sessionId) } as unknown as Agent
 }
 
 describe('dsh-tool-supramas', () => {
@@ -86,11 +95,278 @@ describe('dsh-tool-supramas', () => {
       'supramas_stage1_reviewer_submit',
       'supramas_stage1_finalize',
       'supramas_artifacts_sync',
-      'supramas_paper_store',
-      'supramas_chunk_extract',
-      'supramas_artifact_read',
       'supramas_evidence_verify',
     ])
+  })
+
+  it('publishes the complete closed builder payload schema instead of an open object', async () => {
+    const ctx = await setup()
+    const acceptedBySchema = await call(ctx, 'supramas_stage1_builder_submit', {
+      run_id: 'supramas:missing',
+      revision: 1,
+      paper_node: {
+        paper_id: 'paper-1',
+        paper_title: 'A verified paper',
+        source_type: 'experimental',
+        strategy_records: [{
+          record_id: 'R1',
+          tuning_dimension: 'Composition tuning',
+          tuning_strategy: 'Add BZO.',
+          tuning_effect: 'Improves in-field Jc.',
+          evidence: { chunk_id: 'paper-1-c1', page: 1, evidence_text: 'Improves in-field Jc.' },
+          confidence: 0.9,
+        }],
+        limitation_records: [{
+          limitation_id: 'L1',
+          limitation: 'Only one loading was measured.',
+          expectation: 'Compare multiple loadings.',
+          related_record_ids: ['R1'],
+          evidence: { chunk_id: 'paper-1-c1', page: 1, evidence_text: 'Only one loading was measured.' },
+          confidence: 0.8,
+        }],
+      },
+      notes: [],
+    })
+    expect(acceptedBySchema.isError).toBe(false)
+    if (acceptedBySchema.isError) throw new Error('expected complete draft to reach the domain')
+    expect(acceptedBySchema.value).toMatchObject({
+      status: 'error',
+      error: { code: 'SUPRAMAS_RUN_NOT_FOUND' },
+    })
+
+    const invalidDimension = await call(ctx, 'supramas_stage1_builder_submit', {
+      run_id: 'supramas:missing',
+      revision: 1,
+      paper_node: {
+        paper_id: 'paper-1',
+        paper_title: 'A verified paper',
+        strategy_records: [{
+          record_id: 'R1',
+          tuning_dimension: 1,
+          tuning_strategy: 'Add BZO.',
+          tuning_effect: 'Improves in-field Jc.',
+          evidence: { chunk_id: 'paper-1-c1', evidence_text: 'Improves in-field Jc.' },
+          confidence: 0.9,
+        }],
+        limitation_records: [],
+      },
+      notes: [],
+    })
+    expect(invalidDimension.isError).toBe(true)
+  })
+
+  it('atomically persists only structured subagent handoffs in orchestrated mode', async () => {
+    const ctx = await setup(false)
+    await ctx.plugin(ToolSupraMas, { mode: 'orchestrated', subagentProvider: 'attested' })
+    const created = await ctx.supramas.create({
+      jobId: 'attested-workflow',
+      inputTaskPath: 'runs/attested-workflow/input_task.yaml',
+      runDir: 'runs/attested-workflow',
+    })
+    const ready = await ctx.supramas.transition(created, { phase: 'task_ready' })
+    await ctx.supramas.storePaper(ready.id, {
+      paper_id: 'paper-attested',
+      paper_title: 'Attested handoff paper',
+      local_path: 'runs/attested-workflow/papers/paper-attested.json',
+      source_type: 'experimental',
+      full_text_source: {
+        local_path: 'runs/attested-workflow/papers/raw/paper-attested.pdf',
+        media_type: 'application/pdf',
+        sha256: 'a'.repeat(64),
+        byte_length: 1_024,
+        page_count: 1,
+      },
+    })
+    await ctx.supramas.addEvidenceChunk(ready.id, 'paper-attested', {
+      chunk_id: 'paper-attested-c1',
+      page: 1,
+      text: 'BZO improves in-field Jc, while only one loading was measured.',
+      evidence_kind: 'full_text',
+    })
+    await ctx.supramas.storePaper(ready.id, {
+      paper_id: 'paper-unused',
+      paper_title: 'Unrelated mechanical test',
+      local_path: 'runs/attested-workflow/papers/paper-unused.json',
+      source_type: 'experimental',
+      full_text_source: {
+        local_path: 'runs/attested-workflow/papers/raw/paper-unused.pdf',
+        media_type: 'application/pdf',
+        sha256: 'b'.repeat(64),
+        byte_length: 512,
+        page_count: 1,
+      },
+    })
+    await ctx.supramas.addEvidenceChunk(ready.id, 'paper-unused', {
+      chunk_id: 'paper-unused-c1',
+      page: 1,
+      text: 'This paper does not discuss superconducting flux pinning.',
+      evidence_kind: 'full_text',
+    })
+    const started = await call(ctx, 'supramas_stage1_start', {
+      run_id: ready.id,
+      revision: ready.revision,
+      research_topic: 'REBCO flux pinning',
+      max_depth: 0,
+      max_root_attempts: 1,
+      max_child_attempts_per_limitation: 1,
+    })
+    expect(started.isError).toBe(false)
+
+    const builderHandoff = {
+      paper_node: {
+        paper_id: 'paper-attested',
+        paper_title: 'Attested handoff paper',
+        source_type: 'experimental' as const,
+        strategy_records: [{
+          record_id: 'R1',
+          tuning_dimension: 'Composition tuning' as const,
+          tuning_strategy: 'Add BZO artificial pinning centers.',
+          tuning_effect: 'BZO improves in-field Jc.',
+          evidence: { chunk_id: 'paper-attested-c1', page: 1, evidence_text: 'BZO improves in-field Jc' },
+          confidence: 0.9,
+        }],
+        limitation_records: [{
+          limitation_id: 'L1',
+          limitation: 'Only one loading was measured.',
+          expectation: 'Compare multiple BZO loadings.',
+          evidence: { chunk_id: 'paper-attested-c1', page: 1, evidence_text: 'only one loading was measured' },
+          confidence: 0.9,
+        }],
+      },
+      edge: null,
+      notes: [],
+    }
+    const reviewerHandoff = {
+      decision: 'revise' as const,
+      expectation_satisfaction: 'not_applicable' as const,
+      summary: 'The expectation needs a quantified loading range.',
+      critical_issues: [{
+        target_id: 'L1',
+        issue: 'Specify the loading range.',
+        required_action: 'revise' as const,
+      }],
+      edge_issues: [],
+      acceptance_conditions: ['Specify the loading range.'],
+    }
+    const disposeBuilder = vi.fn()
+    const disposeReviewer = vi.fn()
+    const start = vi.fn<(provider: string, request: SubagentStartRequest) => Promise<unknown>>()
+      .mockResolvedValueOnce({
+        id: 'builder-run-attested',
+        result: Promise.resolve({ stopReason: 'completed', output: [], structured: builderHandoff }),
+        dispose: disposeBuilder,
+      })
+      .mockResolvedValueOnce({
+        id: 'reviewer-run-attested',
+        result: Promise.resolve({ stopReason: 'completed', output: [], structured: reviewerHandoff }),
+        dispose: disposeReviewer,
+      })
+    ctx.provide('subagents', { start } as never)
+    const parent = fakeAgent()
+
+    const built = await call(ctx, 'supramas_stage1_builder_submit', {
+      run_id: ready.id,
+      revision: ready.revision + 1,
+    }, parent)
+    expect(built.isError).toBe(false)
+    const reviewed = await call(ctx, 'supramas_stage1_reviewer_submit', {
+      run_id: ready.id,
+      revision: ready.revision + 2,
+    }, parent)
+    expect(reviewed.isError).toBe(false)
+    if (reviewed.isError) throw new Error('expected attested reviewer handoff')
+    expect(reviewed.value).toMatchObject({
+      next_actions: ['revise_candidate'],
+      data: {
+        workflow: {
+          builder_attempts: [{ builder_run_id: 'builder-run-attested' }],
+          review_log: [{ decision: 'revise', reviewer_run_id: 'reviewer-run-attested' }],
+        },
+      },
+    })
+    expect(start).toHaveBeenCalledTimes(2)
+    expect(start.mock.calls[0]?.[0]).toBe('attested')
+    const builderRequest = start.mock.calls[0]?.[1]
+    if (builderRequest === undefined) throw new Error('expected builder subagent request')
+    expect(builderRequest).toMatchObject({
+      outputSchema: { type: 'object', additionalProperties: false },
+    })
+    const builderToolFilter = builderRequest.toolFilter
+    if (builderToolFilter === undefined) throw new Error('expected builder tool filter')
+    expect(builderToolFilter.allow).not.toContain('supramas_literature_search')
+    expect(builderToolFilter.allow).not.toContain('supramas_paper_import')
+    expect(builderToolFilter.allow).toEqual([
+      'supramas_chunk_list',
+      'supramas_chunk_read',
+      'supramas_evidence_verify',
+    ])
+    expect(JSON.stringify(builderRequest.prompt)).toContain('paper-attested')
+    expect(JSON.stringify(builderRequest.prompt)).not.toContain('paper-unused')
+    expect(JSON.stringify(builderRequest.prompt)).toContain('available_imported_papers')
+    expect(builderRequest.persona).toContain('copy child_tuning_effect byte-for-byte')
+    const reviewerRequest = start.mock.calls[1]?.[1]
+    if (reviewerRequest === undefined) throw new Error('expected reviewer subagent request')
+    expect(reviewerRequest).toMatchObject({
+      outputSchema: { type: 'object', additionalProperties: false },
+    })
+    const reviewerToolFilter = reviewerRequest.toolFilter
+    if (reviewerToolFilter === undefined) throw new Error('expected reviewer tool filter')
+    expect(reviewerToolFilter.allow).toContain('supramas_evidence_verify')
+    expect(disposeBuilder).toHaveBeenCalledOnce()
+    expect(disposeReviewer).toHaveBeenCalledOnce()
+  })
+
+  it('latches a failed atomic handoff and preserves the exact workflow revision', async () => {
+    const ctx = await setup(false)
+    await ctx.plugin(ToolSupraMas, { mode: 'orchestrated', subagentProvider: 'attested' })
+    const created = await ctx.supramas.create({
+      jobId: 'failed-handoff',
+      inputTaskPath: 'runs/failed-handoff/input_task.yaml',
+      runDir: 'runs/failed-handoff',
+    })
+    const ready = await ctx.supramas.transition(created, { phase: 'task_ready' })
+    await call(ctx, 'supramas_stage1_start', {
+      run_id: ready.id,
+      revision: ready.revision,
+      research_topic: 'REBCO flux pinning',
+      max_depth: 0,
+      max_root_attempts: 1,
+      max_child_attempts_per_limitation: 1,
+    })
+    const before = ctx.supramas.getStage1(ready.id)
+    if (before === undefined) throw new Error('expected started workflow')
+    const dispose = vi.fn()
+    const start = vi.fn<(provider: string, request: SubagentStartRequest) => Promise<unknown>>()
+      .mockResolvedValue({
+        id: 'builder-run-failed',
+        result: Promise.resolve({
+          stopReason: 'error',
+          output: [],
+          diagnostic: 'structured output was not produced',
+        }),
+        dispose,
+      })
+    ctx.provide('subagents', { start } as never)
+    const args = { run_id: ready.id, revision: before.run.revision }
+
+    const first = await call(ctx, 'supramas_stage1_builder_submit', args, fakeAgent())
+    const second = await call(ctx, 'supramas_stage1_builder_submit', args, fakeAgent())
+    for (const result of [first, second]) {
+      expect(result.isError).toBe(false)
+      if (result.isError) throw new Error('expected a controlled failure envelope')
+      expect(result.value).toMatchObject({
+        status: 'error',
+        next_actions: ['stop_current_session_and_resume_same_revision'],
+        data: { run: { revision: before.run.revision } },
+        error: { code: 'SUPRAMAS_SUBAGENT_HANDOFF_FAILED' },
+      })
+    }
+    expect(start).toHaveBeenCalledOnce()
+    expect(dispose).toHaveBeenCalledOnce()
+    expect(ctx.supramas.getStage1(ready.id)).toMatchObject({
+      run: { revision: before.run.revision },
+      workflow: { builder_attempts: [] },
+    })
   })
 
   it('creates a run through a deterministic success envelope', async () => {
@@ -158,8 +434,8 @@ describe('dsh-tool-supramas', () => {
 
   it('unregisters all tools when the plugin fiber is disposed', async () => {
     const ctx = await setup(false)
-    const fiber = await ctx.plugin(ToolSupraMas)
-    expect(ctx.tools.schemas()).toHaveLength(14)
+    const fiber = await ctx.plugin(ToolSupraMas, { mode: 'direct' })
+    expect(ctx.tools.schemas()).toHaveLength(11)
     await fiber.dispose()
     expect(ctx.tools.schemas()).toHaveLength(0)
   })
@@ -514,14 +790,13 @@ describe('dsh-tool-supramas', () => {
       },
       reason: 'exercise a malformed root handoff',
     })
-    expect(malformedHandoff.isError).toBe(false)
-    if (malformedHandoff.isError) throw new Error('expected malformed handoff envelope')
-    expect(malformedHandoff.value).toMatchObject({ error: { code: 'SUPRAMAS_DOMAIN_INVALID' } })
+    expect(malformedHandoff.isError).toBe(true)
 
     const reviewed = await call(ctx, 'supramas_stage1_reviewer_submit', {
       run_id: ready.id,
       revision: ready.revision + 2,
       decision: 'accept',
+      expectation_satisfaction: 'not_applicable',
       summary: 'The local chunk supports the candidate.',
       critical_issues: [],
       edge_issues: [],

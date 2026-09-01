@@ -2317,19 +2317,19 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       {
         signature: 'storePaper(id: SupraMasRunIdBrand, metadata: PaperArtifactMetadata): Promise<PaperArtifact>',
         description: 'Register one canonical paper artifact under a run.',
-        parameters: [{ name: 'id', description: 'Stable owning run identity.' }, { name: 'metadata', description: 'Canonical run-local paper metadata.' }],
+        parameters: [{ name: 'id', description: 'Stable owning run identity.' }, { name: 'metadata', description: 'Canonical run-local paper metadata, including durable full-text provenance when acquired.' }],
         returns: 'a detached empty artifact.',
       },
       {
         signature: 'importPaper(id: SupraMasRunIdBrand, request: PaperImportRequest): Promise<PaperArtifact>',
-        description: 'Validate and persist one paper plus all of its page-aware chunks as one storage mutation. Any invalid metadata or chunk fails before the durable record and process catalog change.',
+        description: 'Validate and persist one paper plus all of its provenance-classified page-aware chunks as one storage mutation. Any invalid metadata or chunk fails before the durable record and process catalog change.',
         parameters: [{ name: 'id', description: 'Stable owning run identity.' }, { name: 'request', description: 'Complete paper metadata and extracted chunk set.' }],
         returns: 'the detached complete stored artifact.',
       },
       {
-        signature: 'addEvidenceChunk(id: SupraMasRunIdBrand, paperId: string, chunk: EvidenceChunk): Promise<EvidenceChunk>',
-        description: 'Add one provenance-bound chunk to a stored paper.',
-        parameters: [{ name: 'id', description: 'Stable owning run identity.' }, { name: 'paperId', description: 'Owning paper identity.' }, { name: 'chunk', description: 'Local page-aware evidence text.' }],
+        signature: 'addEvidenceChunk(id: SupraMasRunIdBrand, paperId: string, chunk: EvidenceChunkInput): Promise<EvidenceChunk>',
+        description: 'Add one provenance-bound chunk to a stored paper; omitted evidence kind is stored fail-closed as abstract.',
+        parameters: [{ name: 'id', description: 'Stable owning run identity.' }, { name: 'paperId', description: 'Owning paper identity.' }, { name: 'chunk', description: 'Local page-aware evidence text and optional provenance class.' }],
         returns: 'a detached stored chunk.',
       },
       {
@@ -2339,10 +2339,16 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'the artifact or `undefined` when absent.',
       },
       {
+        signature: 'listPapers(id: SupraMasRunIdBrand): PaperArtifact[]',
+        description: 'List detached local paper artifacts available to one run.',
+        parameters: [{ name: 'id', description: 'Stable owning run identity.' }],
+        returns: 'papers in their stable import order.',
+      },
+      {
         signature: 'verifyEvidence(id: SupraMasRunIdBrand, paperId: string, evidence: EvidenceRef): EvidenceVerification',
         description: 'Verify one evidence quote against run-local paper chunks.',
         parameters: [{ name: 'id', description: 'Stable owning run identity.' }, { name: 'paperId', description: 'Expected owning paper.' }, { name: 'evidence', description: 'Chunk, page, and exact evidence quote.' }],
-        returns: 'stable verified provenance.',
+        returns: 'stable verified provenance including the persisted evidence kind.',
       },
       {
         signature: 'get(id: SupraMasRunIdBrand): RunSnapshot | undefined',
@@ -2376,7 +2382,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: 'submitStage1Review(ref: RunRef, submission: Stage1ReviewSubmission): Promise<Stage1RunState>',
-        description: 'Persist one reviewer decision; only acceptance can add the candidate to the tree.',
+        description: 'Persist one reviewer decision; accepted child edges must match the declared expectation satisfaction.',
         parameters: [{ name: 'ref', description: 'Expected current run revision.' }, { name: 'submission', description: 'Reviewer decision and actionable findings.' }],
         returns: 'the committed workflow and its next action.',
       },
@@ -4261,7 +4267,15 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'EvidenceChunk',
-    declaration: 'export interface EvidenceChunk {\n    chunk_id: string;\n    page?: number | null;\n    text: string;\n}',
+    declaration: 'export interface EvidenceChunk {\n    chunk_id: string;\n    page?: number | null;\n    text: string;\n    evidence_kind: EvidenceKind;\n}',
+  },
+  {
+    name: 'EvidenceChunkInput',
+    declaration: 'export type EvidenceChunkInput = Omit<EvidenceChunk, \'evidence_kind\'> & {\n    evidence_kind?: EvidenceKind;\n};',
+  },
+  {
+    name: 'EvidenceKind',
+    declaration: 'export type EvidenceKind = typeof EVIDENCE_KINDS[number];',
   },
   {
     name: 'EvidenceRef',
@@ -4269,7 +4283,11 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'EvidenceVerification',
-    declaration: 'export interface EvidenceVerification {\n    verified: true;\n    paper_id: string;\n    chunk_id: string;\n    local_path: string;\n}',
+    declaration: 'export interface EvidenceVerification {\n    verified: true;\n    paper_id: string;\n    chunk_id: string;\n    local_path: string;\n    evidence_kind: EvidenceKind;\n}',
+  },
+  {
+    name: 'ExpectationSatisfaction',
+    declaration: 'export type ExpectationSatisfaction = \'not_applicable\' | \'full\' | \'partial\' | \'adjacent\' | \'none\';',
   },
   {
     name: 'FileDiff',
@@ -4338,6 +4356,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'FsWriteOutcome',
     declaration: 'export interface FsWriteOutcome {\n    operation: \'create\' | \'update\';\n    version: FsVersion;\n    before: string | null;\n    after: string;\n}',
+  },
+  {
+    name: 'FullTextSourceArtifact',
+    declaration: 'export interface FullTextSourceArtifact {\n    local_path: string;\n    media_type: \'application/pdf\';\n    sha256: string;\n    byte_length: number;\n    page_count: number;\n}',
   },
   {
     name: 'GenerateOptions',
@@ -4833,7 +4855,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'PaperArtifactMetadata',
-    declaration: 'export interface PaperArtifactMetadata {\n    paper_id: string;\n    paper_title: string;\n    local_path: string;\n    source_type: SourceType;\n}',
+    declaration: 'export interface PaperArtifactMetadata {\n    paper_id: string;\n    paper_title: string;\n    local_path: string;\n    source_type: SourceType;\n    full_text_source?: FullTextSourceArtifact;\n}',
   },
   {
     name: 'PaperImportRequest',
@@ -5745,7 +5767,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'Stage1BuilderAttempt',
-    declaration: 'export interface Stage1BuilderAttempt {\n    attempt_index: number;\n    scope: \'root\' | \'child\';\n    frontier_key?: string;\n    revision_round: number;\n    status: Stage1BuilderAttemptStatus;\n    paper_id?: string;\n    reason?: string;\n}',
+    declaration: 'export interface Stage1BuilderAttempt {\n    attempt_index: number;\n    scope: \'root\' | \'child\';\n    frontier_key?: string;\n    revision_round: number;\n    status: Stage1BuilderAttemptStatus;\n    paper_id?: string;\n    builder_run_id?: string;\n    reason?: string;\n}',
   },
   {
     name: 'Stage1BuilderAttemptStatus',
@@ -5753,7 +5775,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'Stage1BuilderSubmission',
-    declaration: 'export interface Stage1BuilderSubmission {\n    paper_node: PaperNodeDraft | null;\n    edge: ProposedStrategyEdge | null;\n    reason?: string;\n    notes: string[];\n}',
+    declaration: 'export interface Stage1BuilderSubmission {\n    builder_run_id?: string;\n    paper_node: PaperNodeDraft | null;\n    edge: ProposedStrategyEdge | null;\n    reason?: string;\n    notes: string[];\n}',
   },
   {
     name: 'Stage1Frontier',
@@ -5793,7 +5815,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'Stage1ReviewSubmission',
-    declaration: 'export interface Stage1ReviewSubmission {\n    decision: Stage1ReviewDecision;\n    summary: string;\n    critical_issues: Stage1ReviewFinding[];\n    edge_issues: Stage1ReviewFinding[];\n    acceptance_conditions: string[];\n}',
+    declaration: 'export interface Stage1ReviewSubmission {\n    reviewer_run_id?: string;\n    decision: Stage1ReviewDecision;\n    expectation_satisfaction: ExpectationSatisfaction;\n    summary: string;\n    critical_issues: Stage1ReviewFinding[];\n    edge_issues: Stage1ReviewFinding[];\n    acceptance_conditions: string[];\n}',
   },
   {
     name: 'Stage1RunState',
@@ -5805,7 +5827,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'Stage1WorkflowConfig',
-    declaration: 'export interface Stage1WorkflowConfig {\n    jobId: string;\n    researchTopic: string;\n    materialScope?: string[];\n    targetProperty?: string[];\n    evidencePolicy?: string;\n    include?: string[];\n    exclude?: string[];\n    maxDepth: number;\n    maxRootAttempts: number;\n    maxChildAttemptsPerLimitation: number;\n    maxBranchPerNode?: number | null;\n    targetChildNodes?: number | null;\n}',
+    declaration: 'export interface Stage1WorkflowConfig {\n    jobId: string;\n    researchTopic: string;\n    materialScope?: string[];\n    targetProperty?: string[];\n    evidencePolicy?: string;\n    include?: string[];\n    exclude?: string[];\n    maxDepth: number;\n    maxRootAttempts: number;\n    maxChildAttemptsPerLimitation: number;\n    maxBranchPerNode?: number | null;\n    targetChildNodes?: number | null;\n    requireAgentHandoffs?: boolean;\n}',
   },
   {
     name: 'Stage1WorkflowStatus',

@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-This provider downloads a resolved scholarly PDF through DSH public-network policy. It validates HTTP(S) URLs, blocks credentials and private destinations, pins the validated DNS answer set, follows only bounded same-origin redirects, and returns complete bytes or an error.
+This provider downloads a resolved scholarly PDF through DSH public-network policy. It validates HTTP(S) URLs, blocks credentials and private destinations, pins the validated DNS answer set, and follows bounded redirects. Every redirect hop is independently URL-validated, DNS-checked, and address-pinned before a request is sent.
 
 ## Table of Contents
 
@@ -49,7 +49,7 @@ The provider changes no static prefix; the eventual import result is append-only
 
 ## Known Limitations and Deferred Work
 
-- Cross-origin redirects are rejected and require a newly resolved candidate location.
+- Public cross-origin redirects are supported; private, credentialed, malformed, or over-budget redirect targets are rejected.
 - Authentication, cookies, browser state, and paywalled retrieval are intentionally unsupported.
 - A source that omits or lies about `Content-Length` is still bounded while streaming.
 

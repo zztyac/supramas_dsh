@@ -22,35 +22,87 @@ function evidence(): EvidenceCatalog {
     paper_title: 'Root paper',
     local_path: 'runs/demo/papers/paper-1.json',
     source_type: 'experimental',
+    full_text_source: {
+      local_path: 'runs/demo/papers/raw/paper-1.pdf',
+      media_type: 'application/pdf',
+      sha256: '1'.repeat(64),
+      byte_length: 100,
+      page_count: 3,
+    },
   })
   catalog.addChunk('paper-1', {
     chunk_id: 'paper-1-c1',
     page: 1,
     text: 'BZO additions improve in-field Jc, but only one loading was measured.',
+    evidence_kind: 'full_text',
   })
   catalog.storePaper({
     paper_id: 'paper-2',
     paper_title: 'Child paper',
     local_path: 'runs/demo/papers/paper-2.json',
     source_type: 'experimental',
+    full_text_source: {
+      local_path: 'runs/demo/papers/raw/paper-2.pdf',
+      media_type: 'application/pdf',
+      sha256: '2'.repeat(64),
+      byte_length: 200,
+      page_count: 3,
+    },
   })
   catalog.addChunk('paper-2', {
     chunk_id: 'paper-2-c1',
     page: 2,
     text: 'A loading series preserved epitaxy and improved angular pinning, while chemistry remained unresolved.',
+    evidence_kind: 'full_text',
   })
   catalog.storePaper({
     paper_id: 'paper-3',
     paper_title: 'Alternative paper',
     local_path: 'runs/demo/papers/paper-3.json',
     source_type: 'experimental',
+    full_text_source: {
+      local_path: 'runs/demo/papers/raw/paper-3.pdf',
+      media_type: 'application/pdf',
+      sha256: '3'.repeat(64),
+      byte_length: 300,
+      page_count: 3,
+    },
   })
   catalog.addChunk('paper-3', {
     chunk_id: 'paper-3-c1',
     page: 3,
     text: 'An alternative APC study reports a different composition response and an unresolved mechanism.',
+    evidence_kind: 'full_text',
   })
   return catalog
+}
+
+function abstractEvidence(): EvidenceCatalog {
+  const catalog = new EvidenceCatalog('demo')
+  catalog.storePaper({
+    paper_id: 'paper-1',
+    paper_title: 'Root paper',
+    local_path: 'runs/demo/papers/paper-1.json',
+    source_type: 'experimental',
+  })
+  catalog.addChunk('paper-1', {
+    chunk_id: 'paper-1-c1',
+    page: 1,
+    text: 'BZO additions improve in-field Jc, but only one loading was measured.',
+    evidence_kind: 'abstract',
+  })
+  return catalog
+}
+
+function expectDomainCode(action: () => unknown, code: SupraMasDomainError['code']): void {
+  try {
+    action()
+  } catch (error) {
+    expect(error).toBeInstanceOf(SupraMasDomainError)
+    expect((error as SupraMasDomainError).code).toBe(code)
+    return
+  }
+  throw new Error(`expected ${code}`)
 }
 
 function rootDraft(effect = 'BZO additions improve in-field Jc.'): PaperNodeDraft {
@@ -138,6 +190,7 @@ function childEdge(overrides: Partial<ProposedStrategyEdge> = {}): ProposedStrat
 function review(decision: Stage1ReviewSubmission['decision'], summary = `${decision} review`): Stage1ReviewSubmission {
   return {
     decision,
+    expectation_satisfaction: 'not_applicable',
     summary,
     critical_issues: decision === 'revise'
       ? [{ target_id: 'R1', issue: 'Narrow the effect wording.', required_action: 'revise' }]
@@ -220,7 +273,9 @@ describe('Stage 1 builder/reviewer orchestration', () => {
       },
       notes: [],
     }, catalog)
-    const childAccepted = submitStage1Review(childBuilt, review('accept'), catalog)
+    const childAccepted = submitStage1Review(childBuilt, {
+      ...review('accept'), expectation_satisfaction: 'full',
+    }, catalog)
     expect(childAccepted.nodes.map(node => node.node_id)).toEqual(['N0', 'N1'])
     expect(childAccepted.edges).toMatchObject([{
       edge_id: 'E0',
@@ -263,6 +318,61 @@ describe('Stage 1 builder/reviewer orchestration', () => {
     })
     expect(validateStage1Workflow(workflow, new EvidenceCatalog('task-policy')).config)
       .toEqual(workflow.config)
+  })
+
+  it('enforces the no-abstract-only policy at review acceptance, restore, and finalization', () => {
+    const abstract = abstractEvidence()
+    const protectedWorkflow = configured({ maxDepth: 0, exclude: ['abstract-only evidence'] })
+    const pending = submitStage1Builder(
+      protectedWorkflow,
+      { paper_node: rootDraft(), edge: null, notes: [] },
+      abstract,
+    )
+    expectDomainCode(
+      () => submitStage1Review(pending, review('accept'), abstract),
+      'SUPRAMAS_EVIDENCE_POLICY_VIOLATION',
+    )
+    expect(nextStage1Action(pending)).toMatchObject({ kind: 'review_candidate' })
+
+    const fullText = evidence()
+    const acceptedWithoutPolicy = acceptedRoot(fullText, configured({ maxDepth: 0 }))
+    const policyEnabledAfterAcceptance: Stage1Workflow = {
+      ...acceptedWithoutPolicy,
+      config: { ...acceptedWithoutPolicy.config, exclude: ['ABSTRACT-ONLY EVIDENCE'] },
+    }
+    expectDomainCode(
+      () => validateStage1Workflow(policyEnabledAfterAcceptance, abstract),
+      'SUPRAMAS_EVIDENCE_POLICY_VIOLATION',
+    )
+    expectDomainCode(
+      () => finalizeStage1Workflow(policyEnabledAfterAcceptance, abstract),
+      'SUPRAMAS_EVIDENCE_POLICY_VIOLATION',
+    )
+  })
+
+  it('requires reviewer expectation satisfaction to agree with accepted child edge type', () => {
+    const catalog = evidence()
+    const root = acceptedRoot(catalog)
+    const directPending = submitStage1Builder(root, {
+      paper_node: childDraft(), edge: childEdge(), notes: [],
+    }, catalog)
+    expectDomainCode(
+      () => submitStage1Review(directPending, {
+        ...review('accept'), expectation_satisfaction: 'partial',
+      }, catalog),
+      'SUPRAMAS_EDGE_TYPE_MISMATCH',
+    )
+
+    const transferablePending = submitStage1Builder(root, {
+      paper_node: childDraft(),
+      edge: childEdge({ edge_type: 'transferable' }),
+      notes: [],
+    }, catalog)
+    const accepted = submitStage1Review(transferablePending, {
+      ...review('accept'), expectation_satisfaction: 'partial',
+    }, catalog)
+    expect(accepted.edges).toMatchObject([{ edge_type: 'transferable' }])
+    expect(accepted.review_log.at(-1)).toMatchObject({ expectation_satisfaction: 'partial' })
   })
 
   it('uses real empty builder attempts before exhausting a frontier budget', () => {
@@ -396,6 +506,56 @@ describe('Stage 1 builder/reviewer orchestration', () => {
     }, catalog)).toThrow(SupraMasDomainError)
   })
 
+  it('rejects accept decisions that retain unresolved reviewer work', () => {
+    const catalog = evidence()
+    const built = submitStage1Builder(configured(), {
+      paper_node: rootDraft(), edge: null, notes: [],
+    }, catalog)
+
+    for (const conflicting of [
+      {
+        critical_issues: [{
+          target_id: 'S1',
+          issue: 'The record still needs correction.',
+          required_action: 'revise' as const,
+        }],
+      },
+      {
+        edge_issues: [{
+          target_id: 'E1',
+          issue: 'The edge still needs correction.',
+          required_action: 'revise' as const,
+        }],
+      },
+      { acceptance_conditions: ['Correct the unresolved evidence claim.'] },
+    ]) {
+      expect(() => submitStage1Review(built, {
+        ...review('accept'),
+        ...conflicting,
+      }, catalog)).toThrow(/accept review cannot retain unresolved work/)
+    }
+  })
+
+  it('requires auditable subagent handoffs when the workflow enables that policy', () => {
+    const catalog = evidence()
+    const workflow = configured({ requireAgentHandoffs: true })
+    expect(() => submitStage1Builder(workflow, {
+      paper_node: rootDraft(), edge: null, notes: [],
+    }, catalog)).toThrow(/builder subagent run id/)
+
+    const built = submitStage1Builder(workflow, {
+      paper_node: rootDraft(), edge: null, notes: [], builder_run_id: 'builder-run-1',
+    }, catalog)
+    expect(built.builder_attempts[0]).toMatchObject({ builder_run_id: 'builder-run-1' })
+    expect(() => submitStage1Review(built, review('accept'), catalog))
+      .toThrow(/reviewer subagent run id/)
+
+    const accepted = submitStage1Review(built, {
+      ...review('accept'), reviewer_run_id: 'reviewer-run-1',
+    }, catalog)
+    expect(accepted.review_log[0]).toMatchObject({ reviewer_run_id: 'reviewer-run-1' })
+  })
+
   it('supports child revision and rejects paper replacement or missing revised edges', () => {
     const catalog = evidence()
     const root = acceptedRoot(catalog)
@@ -404,6 +564,7 @@ describe('Stage 1 builder/reviewer orchestration', () => {
     }, catalog)
     const revise = submitStage1Review(built, {
       ...review('revise'),
+      expectation_satisfaction: 'partial',
       critical_issues: [],
       edge_issues: [{ target_id: 'E0', issue: 'Clarify the bridge.', required_action: 'revise' }],
     }, catalog)
@@ -425,7 +586,9 @@ describe('Stage 1 builder/reviewer orchestration', () => {
     expect(nextStage1Action(rebuilt)).toMatchObject({
       kind: 'review_candidate', scope: 'child', revision_round: 1,
     })
-    const accepted = submitStage1Review(rebuilt, review('accept'), catalog)
+    const accepted = submitStage1Review(rebuilt, {
+      ...review('accept'), expectation_satisfaction: 'full',
+    }, catalog)
     expect(accepted.edges).toMatchObject([{
       edge_id: 'E0', edge_rationale: 'A clarified direct loading comparison.',
     }])
@@ -450,7 +613,9 @@ describe('Stage 1 builder/reviewer orchestration', () => {
     const targetedChild = submitStage1Builder(targetedRoot, {
       paper_node: childDraft(), edge: childEdge(), notes: [],
     }, catalog)
-    const targeted = submitStage1Review(targetedChild, review('accept'), catalog)
+    const targeted = submitStage1Review(targetedChild, {
+      ...review('accept'), expectation_satisfaction: 'full',
+    }, catalog)
     expect(targeted.frontiers).toMatchObject([
       { status: 'accepted_edge' },
       { status: 'target_child_cap_reached' },
@@ -473,7 +638,9 @@ describe('Stage 1 builder/reviewer orchestration', () => {
       edge: minimalChildEdge,
       notes: [],
     }, catalog)
-    const widthCapped = submitStage1Review(widthChild, review('accept'), catalog)
+    const widthCapped = submitStage1Review(widthChild, {
+      ...review('accept'), expectation_satisfaction: 'full',
+    }, catalog)
     expect(widthCapped.frontiers).toMatchObject([
       { limitation_id: 'L1', status: 'accepted_edge' },
       { limitation_id: 'L1b', status: 'width_cap_reached' },

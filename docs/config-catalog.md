@@ -2598,14 +2598,14 @@ Requires: `supramasLiterature`
 export interface Config {
   /** Maximum wall-clock milliseconds for one complete acquisition. */
   readonly timeoutMs?: number
-  /** Maximum same-origin redirects followed before rejecting the source. */
+  /** Maximum independently validated public redirects followed before rejecting the source. */
   readonly maxRedirects?: number
   /** Non-empty HTTP User-Agent sent to scholarly document hosts. */
   readonly userAgent?: string
 }
 ```
 
-Source: [`packages/supramas/supramas-paper-http/src/index.ts:25`](../packages/supramas/supramas-paper-http/src/index.ts)
+Source: [`packages/supramas/supramas-paper-http/src/index.ts:24`](../packages/supramas/supramas-paper-http/src/index.ts)
 
 <a id="deepseek-aidsh-supramas-paper-ingest"></a>
 
@@ -3136,6 +3136,26 @@ Depends on: [`SubagentReportDelivery`](subsystems/subagent.md)
 
 Source: [`packages/subagent/tool-subagent-report/src/index.ts:27`](../packages/subagent/tool-subagent-report/src/index.ts)
 
+<a id="deepseek-aidsh-tool-supramas"></a>
+
+## `@deepseek-ai/dsh-tool-supramas`
+
+Requires: `tools` · `supramas` · `supramasArtifacts`
+
+```ts config-catalog
+/** Model handoff policy for Stage 1 submission tools. */
+export interface Config {
+  /** Orchestrated mode atomically delegates; direct mode exists for trusted integration callers. */
+  mode?: 'orchestrated' | 'direct'
+  /** Registered one-shot subagent provider used by orchestrated mode. */
+  subagentProvider?: string
+  /** Maximum wall-clock time for one atomic builder or reviewer handoff. */
+  handoffTimeoutMs?: number
+}
+```
+
+Source: [`packages/supramas/tool-supramas/src/index.ts:37`](../packages/supramas/tool-supramas/src/index.ts)
+
 <a id="deepseek-aidsh-tool-supramas-literature"></a>
 
 ## `@deepseek-ai/dsh-tool-supramas-literature`
@@ -3607,7 +3627,6 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 - `@deepseek-ai/dsh-tool-call-timeout-policy` — requires `tools` ([`packages/guard/timeout-policy/src/index.ts`](../packages/guard/timeout-policy/src/index.ts))
 - `@deepseek-ai/dsh-tool-cordis` — requires `tools` · `systemPrompt` · `dynamicCordisRunner` · `cordisInspect` ([`packages/extensions/tool-cordis/src/index.ts`](../packages/extensions/tool-cordis/src/index.ts))
 - `@deepseek-ai/dsh-tool-subagent-control` — requires `tools` · `subagents` ([`packages/subagent/tool-subagent-control/src/index.ts`](../packages/subagent/tool-subagent-control/src/index.ts))
-- `@deepseek-ai/dsh-tool-supramas` — requires `tools` · `supramas` · `supramasArtifacts` ([`packages/supramas/tool-supramas/src/index.ts`](../packages/supramas/tool-supramas/src/index.ts))
 - `@deepseek-ai/dsh-user-questions` ([`packages/interaction/user-questions/src/index.ts`](../packages/interaction/user-questions/src/index.ts))
 - `@deepseek-ai/dsh-webhook` — requires `agents` · `agentDefaultModel` · `agentPresets` · `permissionPresets` · `sessionTitle` · `workspaceRegistry` ([`packages/webhook/webhook/src/index.ts`](../packages/webhook/webhook/src/index.ts))
 - `@deepseek-ai/dsh-workspace` — requires `storageDomain` · `sessionPersistence` ([`packages/workspace/workspace/src/index.ts`](../packages/workspace/workspace/src/index.ts))

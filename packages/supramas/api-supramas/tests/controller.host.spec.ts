@@ -88,7 +88,7 @@ async function completedRun(controller: SupraMasController, ctx: Context) {
       local_path: 'runs/ui-completed-demo/papers/paper-1.json',
       source_type: 'experimental',
     },
-    chunks: [{ chunk_id: 'paper-1-c1', page: 7, text: evidenceText }],
+    chunks: [{ chunk_id: 'paper-1-c1', page: 7, text: evidenceText, evidence_kind: 'abstract' }],
   })
   const built = await ctx.supramas.submitStage1Builder({
     id: SupraMasRunId(created.run.id),
@@ -124,6 +124,7 @@ async function completedRun(controller: SupraMasController, ctx: Context) {
   })
   const accepted = await ctx.supramas.submitStage1Review(built.run, {
     decision: 'accept',
+    expectation_satisfaction: 'not_applicable',
     summary: 'The local full text supports the node.',
     critical_issues: [],
     edge_issues: [],

@@ -86,10 +86,26 @@ describe('SupraMasPaperIngest', () => {
     expect(summary.chunkCount).toBeGreaterThan(2)
     expect(new TextDecoder().decode(await readFile(join(artifactRoot, summary.sourcePath)))).toBe('%PDF-complete')
     const artifact = ctx.supramas.readPaper(run.id, paperId)
+    expect(artifact?.full_text_source).toEqual({
+      local_path: summary.sourcePath,
+      media_type: 'application/pdf',
+      sha256: summary.sourceSha256,
+      byte_length: summary.sourceBytes,
+      page_count: summary.pageCount,
+    })
     expect(artifact?.chunks).toHaveLength(summary.chunkCount)
-    expect(artifact?.chunks[0]).toMatchObject({ page: 1, chunk_id: `${paperId}-p1-c1` })
-    const compatible = JSON.parse(await readFile(join(artifactRoot, summary.artifactPath), 'utf8')) as { chunks: unknown[] }
+    expect(artifact?.chunks[0]).toMatchObject({
+      page: 1,
+      chunk_id: `${paperId}-p1-c1`,
+      evidence_kind: 'full_text',
+    })
+    const compatible = JSON.parse(await readFile(join(artifactRoot, summary.artifactPath), 'utf8')) as {
+      chunks: Array<{ evidence_kind: string }>
+      full_text_source: { sha256: string }
+    }
     expect(compatible.chunks).toHaveLength(summary.chunkCount)
+    expect(compatible.chunks.every(chunk => chunk.evidence_kind === 'full_text')).toBe(true)
+    expect(compatible.full_text_source.sha256).toBe(summary.sourceSha256)
   })
 
   it('leaves no durable paper or compatibility JSON when parsing fails', async () => {

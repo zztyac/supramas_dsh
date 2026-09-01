@@ -133,6 +133,7 @@ function renderPaper(node: PaperNode | undefined, artifact: PaperArtifact): stri
     ...(node?.doi === undefined ? {} : { doi: node.doi }),
     ...(node?.url === undefined ? {} : { url: node.url }),
     source_type: artifact.source_type,
+    ...(artifact.full_text_source === undefined ? {} : { full_text_source: artifact.full_text_source }),
     local_path: artifact.local_path,
     chunks: artifact.chunks,
   })
@@ -163,11 +164,12 @@ function renderReviewReport(workflow: Stage1Workflow): string {
   return lines.join('\n')
 }
 
-function manifestFiles(workflow: Stage1Workflow): string[] {
+function manifestFiles(workflow: Stage1Workflow, rawSources: readonly string[]): string[] {
   const runDir = `runs/${workflow.config.jobId}`
   return [
     `${runDir}/input_task.yaml`,
     ...workflow.nodes.map(node => `${runDir}/papers/${node.paper_id}.json`),
+    ...rawSources,
     `${runDir}/tree_state.json`,
     `${runDir}/outputs/strategy_tree.json`,
     `${runDir}/outputs/node_review_log.jsonl`,
@@ -365,11 +367,16 @@ export class SupraMasArtifacts extends Service {
       }
       const workflow = state.workflow
       const runDir = `runs/${workflow.config.jobId}`
+      const rawSources: string[] = []
       await this.write(`${runDir}/input_task.yaml`, renderInputTask(workflow))
       for (const node of workflow.nodes) {
         const artifact = this.ctx.supramas.readPaper(id, node.paper_id)
         if (artifact === undefined) {
           throw new Error(`supramas-artifacts: accepted paper ${node.paper_id} has no stored artifact`)
+        }
+        if (artifact.full_text_source !== undefined) {
+          await access(this.absolute(artifact.full_text_source.local_path))
+          rawSources.push(artifact.full_text_source.local_path)
         }
         await this.write(`${runDir}/papers/${node.paper_id}.json`, renderPaper(node, artifact))
       }
@@ -392,7 +399,7 @@ export class SupraMasArtifacts extends Service {
       await this.write(`${runDir}/outputs/strategy_tree.json`, json(tree))
       await this.write(`${runDir}/outputs/node_review_log.jsonl`, renderReviewLog(workflow))
       await this.write(`${runDir}/outputs/review_report.md`, renderReviewReport(workflow))
-      return { runId: id, files: manifestFiles(workflow) }
+      return { runId: id, files: manifestFiles(workflow, rawSources) }
     })
   }
 }

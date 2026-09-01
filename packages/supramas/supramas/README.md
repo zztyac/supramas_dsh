@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-This capability registers `ctx.supramas`, a deterministic material-science run registry backed by the DSH storage-domain service. Each run has a stable identity, compare-and-set revision, constrained phase graph, canonical artifact paths, role allowlists, an isolated evidence catalog, and an optional durable Stage 1 workflow.
+This capability registers `ctx.supramas`, a deterministic material-science run registry backed by the DSH storage-domain service. Each run has a stable identity, compare-and-set revision, constrained phase graph, canonical artifact paths, role allowlists, an isolated provenance-classified evidence catalog, and an optional durable Stage 1 workflow.
 
 ## Table of Contents
 
@@ -21,7 +21,7 @@ This capability registers `ctx.supramas`, a deterministic material-science run r
 
 ## Use this package
 
-Mount the DSH storage stack and this service before any SupraMAS tool consumer. Create a run, advance it to `task_ready`, and call `startStage1()` with the exact revision. Read `getStage1().nextAction`, submit builder/reviewer results through their CAS methods, and call `finalizeStage1()` only after the state machine reports `finalize`. After a restart, transition the recovered revision back to `running`; the exact pending action is preserved.
+Mount the DSH storage stack and this service before any SupraMAS tool consumer. Import complete PDFs through the ingestion service so stored paper metadata carries `full_text_source` and parsed chunks carry `evidence_kind: full_text`; manual chunks default to `abstract`. Create a run, advance it to `task_ready`, and drive `startStage1()` through `finalizeStage1()` with the exact returned revisions. Restored workflows are revalidated before their pending action is exposed.
 
 ## Understand the implementation
 
@@ -47,9 +47,9 @@ No direct effect. Changing a role's visible tool list changes the request prefix
 
 ## Known Limitations and Deferred Work
 
-- Durable records contain paper metadata and extracted chunks, but this package does not fetch or parse PDFs.
-- `local_path` is validated as the canonical provenance path; a filesystem ingestion provider must materialize the referenced source separately.
-- Scientific review remains a separate, read-only subagent decision; the runtime only enforces its accept/revise/reject gate.
+- Durable records contain paper metadata, a verified source descriptor when available, and provenance-classified chunks, but this package does not fetch or parse PDFs.
+- A filesystem ingestion provider must materialize the canonical raw PDF referenced by `full_text_source.local_path`.
+- Scientific review remains a separate, read-only subagent decision; the runtime enforces the decision gate and the declared expectation-satisfaction/edge-type mapping.
 
 ### Dev Note
 

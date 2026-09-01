@@ -104,6 +104,7 @@ const rootDraft: PaperNodeDraft = {
 
 const acceptedReview: Stage1ReviewSubmission = {
   decision: 'accept',
+  expectation_satisfaction: 'not_applicable',
   summary: 'The local chunk supports the candidate.',
   critical_issues: [],
   edge_issues: [],

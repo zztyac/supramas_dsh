@@ -64,7 +64,7 @@ describe('HttpPaperAcquisitionProvider', () => {
     expect(result.bytes.byteLength).toBe(0)
   })
 
-  it('follows only bounded same-origin redirects', async () => {
+  it('follows bounded public redirects across origins and revalidates every hop', async () => {
     handler = (request, response) => {
       if (request.url === '/start') {
         response.writeHead(302, { location: '/paper.pdf' })
@@ -77,11 +77,34 @@ describe('HttpPaperAcquisitionProvider', () => {
     await expect(provider().acquire({ url: `${base}/start`, maxBytes: 5 }))
       .resolves.toMatchObject({ url: `${base}/paper.pdf` })
 
-    handler = (_request, response) => {
-      response.writeHead(302, { location: 'https://example.com/paper.pdf' })
-      response.end()
+    const port = (server.address() as AddressInfo).port
+    handler = (request, response) => {
+      if (request.url === '/cross') {
+        response.writeHead(302, { location: `http://paper.test:${port}/paper.pdf` })
+        response.end()
+        return
+      }
+      response.writeHead(200, { 'content-type': 'application/pdf' })
+      response.end('%PDF-')
     }
     await expect(provider().acquire({ url: `${base}/cross`, maxBytes: 5 }))
+      .resolves.toMatchObject({ url: `http://paper.test:${port}/paper.pdf` })
+
+    handler = (_request, response) => {
+      response.writeHead(302, { location: 'https://private.test/paper.pdf' })
+      response.end()
+    }
+    vi.mocked(publicHttpNetwork.resolve)
+      .mockResolvedValueOnce([{ address: '127.0.0.1', family: 4 }])
+      .mockRejectedValueOnce(Object.assign(new Error('private'), { code: 'WEB_BLOCKED_URL' }))
+    await expect(provider().acquire({ url: `${base}/private-redirect`, maxBytes: 5 }))
+      .rejects.toMatchObject({ code: 'SUPRAMAS_LITERATURE_SOURCE_BLOCKED' })
+
+    handler = (_request, response) => {
+      response.writeHead(302, { location: '/loop' })
+      response.end()
+    }
+    await expect(provider({ maxRedirects: 1 }).acquire({ url: `${base}/loop`, maxBytes: 5 }))
       .rejects.toMatchObject({ code: 'SUPRAMAS_LITERATURE_REDIRECT_BLOCKED' })
   })
 

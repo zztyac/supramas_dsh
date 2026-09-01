@@ -60,8 +60,8 @@ export function coordinatorPrompt(view: SupraMasRunViewV1): string {
     `run_id=${view.run.id}`,
     `job_id=${view.run.jobId}`,
     '先调用 supramas_stage1_get 读取持久化 next_action。',
-    '根据 next_action 使用 strategy-builder-agent 与 strategy-tree-reviewer 完成构建/审查闭环，',
-    '每次结果都通过 SupraMAS Stage 1 工具写回；仅使用审查通过且有本地证据的论文节点。',
+    '根据 next_action 使用 supramas_builder 与 supramas_reviewer 完成构建和独立审查闭环。',
+    '每次结果都通过 SupraMAS Stage 1 工具写回；搜索摘要只能用于发现论文，不能作为证据。',
     '当 next_action=finalize 时调用 supramas_stage1_finalize；遇到可恢复失败时保留状态并说明下一步。',
   ].join('\n')
 }
@@ -75,9 +75,14 @@ export function apply(ctx: ClientContext): void {
 
   const warning = (key: SupraMasKey): string => ctx.locale.bind(NS)(key)
   const queue = async (view: SupraMasRunViewV1): Promise<{ queued: boolean; warning?: string }> => {
-    const current = ctx.sessions.list.getSnapshot().current
-    const session = current === undefined ? undefined : ctx.sessions.binding(current)?.session
+    const snapshot = ctx.sessions.list.getSnapshot()
+    const current = snapshot.current
+    if (current === undefined) return { queued: false, warning: warning('notice.noSession') }
+    const session = ctx.sessions.binding(current)?.session
     if (session === undefined) return { queued: false, warning: warning('notice.noSession') }
+    if (snapshot.byId[current]?.projectionValues?.agentPreset !== 'supramas') {
+      return { queued: false, warning: warning('notice.wrongPreset') }
+    }
     const result = await session.prompt([{ type: 'text', text: coordinatorPrompt(view) }], 'queue')
     return result.ok ? { queued: true } : { queued: false, warning: result.error.message }
   }

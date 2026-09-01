@@ -28,7 +28,7 @@
 | `@deepseek-ai/dsh-tool-bash-persistent` | `bash` | `ctx.tools`、`ctx.terminals`、`an owning Agent at execution time` | `tool/call`、`PTY shell state`、`tool/result` | - | 一个按所有者隔离的持久 bash 工具；部署组合提供 PTY 后端，并可覆盖面向模型的环境描述。 |
 | `@deepseek-ai/dsh-tool-pwsh-persistent` | `pwsh` | `ctx.tools`、`ctx.terminals`、`an owning Agent at execution time` | `tool/call`、`PTY shell state`、`tool/result` | - | 一个按所有者隔离的持久 pwsh 工具，持久 bash 工具的 Windows 对应物；部署组合提供 pwsh 方言的 PTY 后端，并可覆盖面向模型的环境描述。 |
 | `@deepseek-ai/dsh-tool-str-replace-editor` | `str_replace_editor` | `ctx.tools`、`ctx.fs` | `tool/call`、`fs/observed after view presence/absence, edit absence, or successful mutation`、`tool/result` | - | 基于文件系统 seam 的独立查看／创建／唯一字面量替换／按行插入工具；可与任何 shell 或终端接口组合。 |
-| `@deepseek-ai/dsh-tool-supramas` | `supramas_artifact_read`、`supramas_artifacts_sync`、`supramas_chunk_extract`、`supramas_evidence_verify`、`supramas_paper_store`、`supramas_run_create`、`supramas_run_get`、`supramas_run_list`、`supramas_run_transition`、`supramas_stage1_builder_submit`、`supramas_stage1_finalize`、`supramas_stage1_get`、`supramas_stage1_reviewer_submit`、`supramas_stage1_start` | `ctx.tools`、`ctx.supramas`、`ctx.supramasArtifacts` | `tool/call`、`durable SupraMAS run, evidence, or Stage 1 workflow state`、`workspace-confined Stage 1 compatibility files`、`tool/result` | - | 十四个边界明确的材料科学工具提供持久运行控制、带来源约束的证据、兼容文件修复和 Stage 1 builder/reviewer 状态机，并且不会绕过 reviewer 接收门。 |
+| `@deepseek-ai/dsh-tool-supramas` | `supramas_artifacts_sync`、`supramas_evidence_verify`、`supramas_run_create`、`supramas_run_get`、`supramas_run_list`、`supramas_run_transition`、`supramas_stage1_builder_submit`、`supramas_stage1_finalize`、`supramas_stage1_get`、`supramas_stage1_reviewer_submit`、`supramas_stage1_start` | `ctx.tools`、`ctx.supramas`、`ctx.supramasArtifacts` | `tool/call`、`durable SupraMAS run, evidence, or Stage 1 workflow state`、`workspace-confined Stage 1 compatibility files`、`tool/result` | - | 十一个编排安全的材料科学工具提供持久运行控制、逐字证据核验、兼容文件修复和 Stage 1 builder/reviewer 状态机，不向模型开放证据变更能力。 |
 | `@deepseek-ai/dsh-tool-supramas-literature` | `supramas_chunk_list`、`supramas_chunk_read`、`supramas_literature_search`、`supramas_paper_import` | `ctx.tools`、`ctx.supramas`、`ctx.supramasLiterature`、`ctx.supramasPaperIngest` | `tool/call`、`durable paper and evidence import through ctx.supramasPaperIngest`、`tool/result` | - | 四个有界工具提供不透明候选检索、完整论文导入、无正文分块索引和分页证据读取，不公开文档 URL 或绝对路径。 |
 | `@deepseek-ai/dsh-tool-fs` | `edit`、`read`、`read_image`、`write` | `ctx.tools`、`ctx.fs`、`ctx.systemPrompt`、`ctx.attachments (image-tool registration)`、`ctx.llm + an image-capable route (image-tool execution)` | `tool/call`、`fs/write-intent or fs/edit-intent for mutations`、`fs/observed after read presence/absence or successful file operation`、`durable attachment (read_image)`、`tool/result` | - | 先读后写／编辑策略由 `@deepseek-ai/dsh-fs-observation-policy` 添加；它是一个 `fs/*` 事件门禁插件，不会改变 schema。加载这些工具的部署按预期也应加载该插件。没有 `ctx.attachments` 时图片工具不会注册；其 schema 与路由无关，执行时除非确切路由的模型声明图片输入，否则拒绝。 |
 | `@deepseek-ai/dsh-tool-fs-search` | `glob`、`grep` | `ctx.tools`、`ctx.subprocess`、`ctx.systemPrompt` | `tool/call`、`tool/result` | - | glob 和 grep 是无条件可用的发现工具，通过 ctx.subprocess spawn 随包提供的 ripgrep 二进制文件（`@vscode/ripgrep`），并作为普通前台调用运行，绝不作为后台任务；无需在宿主机安装 `rg`，也不经过 shell 层。本目录使用 `sampleOverCapGlobResults: true`；部署必须显式选择该行为。结果超过上限时，会通过可选的 ctx.spillStore 后端保存完整的格式化列表；在共置部署中，如果后端公开本地路径，返回的定位信息可供后续读取／搜索。 |
@@ -673,32 +673,6 @@ pwsh 工具是 Windows 组合中 bash 执行器 seam 的 PowerShell 方言消费
 
 ## `@deepseek-ai/dsh-tool-supramas`
 
-### `supramas_artifact_read`
-
-读取一项运行内论文的有界元数据，不返回完整证据文本。
-
-```json
-{
-  "type": "object",
-  "properties": {
-    "run_id": {
-      "type": "string",
-      "description": "Owning deterministic SupraMAS run id."
-    },
-    "paper_id": {
-      "type": "string",
-      "description": "Registered paper identity."
-    }
-  },
-  "required": [
-    "run_id",
-    "paper_id"
-  ]
-}
-```
-
-来源：[`packages/supramas/tool-supramas/src/index.ts`](../packages/supramas/tool-supramas/src/index.ts)
-
 ### `supramas_artifacts_sync`
 
 根据持久状态幂等修复或刷新 Stage 1 兼容文件。
@@ -714,46 +688,6 @@ pwsh 工具是 Windows 组合中 bash 执行器 seam 的 PowerShell 方言消费
   },
   "required": [
     "run_id"
-  ]
-}
-```
-
-来源：[`packages/supramas/tool-supramas/src/index.ts`](../packages/supramas/tool-supramas/src/index.ts)
-
-### `supramas_chunk_extract`
-
-在已登记的本地论文下持久化一个带页码的证据文本块。
-
-```json
-{
-  "type": "object",
-  "properties": {
-    "run_id": {
-      "type": "string",
-      "description": "Owning deterministic SupraMAS run id."
-    },
-    "paper_id": {
-      "type": "string",
-      "description": "Owning registered paper identity."
-    },
-    "chunk_id": {
-      "type": "string",
-      "description": "Globally unique run-local chunk identity."
-    },
-    "page": {
-      "type": "integer",
-      "description": "One-based source page when available."
-    },
-    "text": {
-      "type": "string",
-      "description": "Full persisted chunk text, not a paraphrase."
-    }
-  },
-  "required": [
-    "run_id",
-    "paper_id",
-    "chunk_id",
-    "text"
   ]
 }
 ```
@@ -794,54 +728,6 @@ pwsh 工具是 Windows 组合中 bash 执行器 seam 的 PowerShell 方言消费
     "paper_id",
     "chunk_id",
     "evidence_text"
-  ]
-}
-```
-
-来源：[`packages/supramas/tool-supramas/src/index.ts`](../packages/supramas/tool-supramas/src/index.ts)
-
-### `supramas_paper_store`
-
-在规范的运行内论文路径登记一项已核验的论文产物。
-
-```json
-{
-  "type": "object",
-  "properties": {
-    "run_id": {
-      "type": "string",
-      "description": "Owning deterministic SupraMAS run id."
-    },
-    "paper_id": {
-      "type": "string",
-      "description": "Stable paper identity used by one tree node."
-    },
-    "paper_title": {
-      "type": "string",
-      "description": "Verified publication title."
-    },
-    "local_path": {
-      "type": "string",
-      "description": "Canonical runs/<job_id>/papers/<paper_id>.json path."
-    },
-    "source_type": {
-      "type": "string",
-      "description": "Scientific source classification.",
-      "enum": [
-        "experimental",
-        "review",
-        "theory",
-        "dataset",
-        "unknown"
-      ]
-    }
-  },
-  "required": [
-    "run_id",
-    "paper_id",
-    "paper_title",
-    "local_path",
-    "source_type"
   ]
 }
 ```
@@ -969,7 +855,7 @@ pwsh 工具是 Windows 组合中 bash 执行器 seam 的 PowerShell 方言消费
 
 ### `supramas_stage1_builder_submit`
 
-提交一次 builder 尝试；候选项在 reviewer 批准前保持未接收状态。
+原子委派当前构建动作，并持久化结构化 builder 交接结果。
 
 ```json
 {
@@ -982,27 +868,6 @@ pwsh 工具是 Windows 组合中 bash 执行器 seam 的 PowerShell 方言消费
     "revision": {
       "type": "integer",
       "description": "Exact current run revision."
-    },
-    "paper_node": {
-      "type": "object",
-      "description": "Complete paper-node draft, omitted only when no supported candidate was found.",
-      "additionalProperties": true
-    },
-    "edge": {
-      "type": "object",
-      "description": "Complete proposed child edge; omit for a root or unsupported child bridge.",
-      "additionalProperties": true
-    },
-    "reason": {
-      "type": "string",
-      "description": "Evidence-based reason for an empty candidate or edge."
-    },
-    "notes": {
-      "type": "array",
-      "description": "Concise builder handoff notes.",
-      "items": {
-        "type": "string"
-      }
     }
   },
   "required": [
@@ -1012,7 +877,7 @@ pwsh 工具是 Windows 组合中 bash 执行器 seam 的 PowerShell 方言消费
 }
 ```
 
-来源：[`packages/supramas/tool-supramas/src/index.ts`](../packages/supramas/tool-supramas/src/index.ts)
+Source: [`packages/supramas/tool-supramas/src/index.ts`](../packages/supramas/tool-supramas/src/index.ts)
 
 ### `supramas_stage1_finalize`
 
@@ -1063,7 +928,7 @@ pwsh 工具是 Windows 组合中 bash 执行器 seam 的 PowerShell 方言消费
 
 ### `supramas_stage1_reviewer_submit`
 
-为当前待处理候选项提交 accept、revise 或 reject 决定。
+原子委派独立审查，并持久化结构化 reviewer 交接结果。
 
 ```json
 {
@@ -1076,99 +941,16 @@ pwsh 工具是 Windows 组合中 bash 执行器 seam 的 PowerShell 方言消费
     "revision": {
       "type": "integer",
       "description": "Exact current run revision."
-    },
-    "decision": {
-      "type": "string",
-      "enum": [
-        "accept",
-        "revise",
-        "reject"
-      ]
-    },
-    "summary": {
-      "type": "string",
-      "description": "Evidence-grounded review summary."
-    },
-    "critical_issues": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "target_id": {
-            "type": "string"
-          },
-          "issue": {
-            "type": "string"
-          },
-          "required_action": {
-            "type": "string",
-            "enum": [
-              "revise",
-              "remove",
-              "downgrade",
-              "provide_more_evidence",
-              "answer_question"
-            ]
-          }
-        },
-        "required": [
-          "target_id",
-          "issue",
-          "required_action"
-        ]
-      }
-    },
-    "edge_issues": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "target_id": {
-            "type": "string"
-          },
-          "issue": {
-            "type": "string"
-          },
-          "required_action": {
-            "type": "string",
-            "enum": [
-              "revise",
-              "remove",
-              "downgrade",
-              "provide_more_evidence",
-              "answer_question"
-            ]
-          }
-        },
-        "required": [
-          "target_id",
-          "issue",
-          "required_action"
-        ]
-      }
-    },
-    "acceptance_conditions": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      }
     }
   },
   "required": [
     "run_id",
-    "revision",
-    "decision",
-    "summary",
-    "critical_issues",
-    "edge_issues",
-    "acceptance_conditions"
+    "revision"
   ]
 }
 ```
 
-来源：[`packages/supramas/tool-supramas/src/index.ts`](../packages/supramas/tool-supramas/src/index.ts)
+Source: [`packages/supramas/tool-supramas/src/index.ts`](../packages/supramas/tool-supramas/src/index.ts)
 
 ### `supramas_stage1_start`
 
@@ -1256,7 +1038,7 @@ pwsh 工具是 Windows 组合中 bash 执行器 seam 的 PowerShell 方言消费
 
 来源：[`packages/supramas/tool-supramas/src/index.ts`](../packages/supramas/tool-supramas/src/index.ts)
 
-十四个边界明确的材料科学工具提供持久运行控制、带来源约束的证据、兼容文件修复和 Stage 1 builder/reviewer 状态机，并且不会绕过 reviewer 接收门。
+十一个编排安全的材料科学工具提供持久运行控制、逐字证据核验、兼容文件修复和 Stage 1 builder/reviewer 状态机，不向模型开放证据变更能力。
 
 <a id="deepseek-aidsh-tool-supramas-literature"></a>
 
@@ -1324,7 +1106,7 @@ pwsh 工具是 Windows 组合中 bash 执行器 seam 的 PowerShell 方言消费
 
 ### `supramas_literature_search`
 
-检索结构化学术索引，返回有界的不透明候选，不公开文档下载 URL。
+检索结构化学术索引，仅用于发现；返回的摘要绝不能作为可接受证据。
 
 ```json
 {
@@ -1350,7 +1132,7 @@ pwsh 工具是 Windows 组合中 bash 执行器 seam 的 PowerShell 方言消费
 
 ### `supramas_paper_import`
 
-获取、校验、解析、分块并原子持久化一个由服务签发的开放获取论文候选。
+获取、校验、解析、分块并原子持久化一个由服务签发的开放获取全文论文候选。
 
 ```json
 {

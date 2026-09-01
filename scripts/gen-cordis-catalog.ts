@@ -247,6 +247,7 @@ export const LINK_MAP: Readonly<Record<string, string>> = {
   DocumentParseResult: 'supramas.md',
   DocumentParserProvider: 'supramas.md',
   EvidenceChunk: 'supramas.md',
+  EvidenceChunkInput: 'supramas.md',
   EvidenceRef: 'supramas.md',
   EvidenceVerification: 'supramas.md',
   FinalizedStage1RunState: 'supramas.md',

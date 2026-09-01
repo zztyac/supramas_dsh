@@ -1,21 +1,30 @@
 /** Model-facing tools for the SupraMAS material-science run capability. */
 
 import type { Context } from '@deepseek-ai/cordis'
-import { defineTool, type JsonValue, type ValueSchemaSpec } from '@deepseek-ai/dsh-tools'
+import z from '@deepseek-ai/schemastery'
 import {
+  defineTool,
+  valueSchemaSpecToJsonSchema,
+  type JsonValue,
+  type ToolRunContext,
+  type ValueSchemaSpec,
+} from '@deepseek-ai/dsh-tools'
+import type { SubagentStartRequest } from '@deepseek-ai/dsh-subagent'
+import type {} from '@deepseek-ai/dsh-subagent'
+import {
+  EDGE_TYPES,
   RUN_PHASES,
   SOURCE_TYPES,
   SupraMasDomainError,
   SupraMasError,
   SupraMasRunId,
-  type EvidenceChunk,
+  TUNING_DIMENSIONS,
   type EvidenceVerification,
   type FinalizedStage1RunState,
   type PaperArtifact,
-  type PaperNodeDraft,
-  type ProposedStrategyEdge,
   type RunSnapshot,
-  type SourceType,
+  type Stage1BuilderSubmission,
+  type Stage1ReviewSubmission,
   type Stage1RunState,
 } from '@deepseek-ai/dsh-supramas'
 import '@deepseek-ai/dsh-supramas'
@@ -23,6 +32,22 @@ import '@deepseek-ai/dsh-supramas-artifacts'
 
 export const name = 'tool-supramas'
 export const inject = ['tools', 'supramas', 'supramasArtifacts']
+
+/** Model handoff policy for Stage 1 submission tools. */
+export interface Config {
+  /** Orchestrated mode atomically delegates; direct mode exists for trusted integration callers. */
+  mode?: 'orchestrated' | 'direct'
+  /** Registered one-shot subagent provider used by orchestrated mode. */
+  subagentProvider?: string
+  /** Maximum wall-clock time for one atomic builder or reviewer handoff. */
+  handoffTimeoutMs?: number
+}
+
+export const Config: z<Config> = z.object({
+  mode: z.union(['orchestrated', 'direct'] as const).default('orchestrated'),
+  subagentProvider: z.string().default('spawn'),
+  handoffTimeoutMs: z.number().step(1).min(1_000).max(3_600_000).default(600_000),
+})
 
 interface ToolFailure {
   code: string
@@ -39,8 +64,6 @@ interface ToolEnvelope {
   data?: {
     run?: RunSnapshot
     runs?: RunSnapshot[]
-    paper?: PaperSummary
-    chunk?: ToolEvidenceChunk
     verification?: EvidenceVerification
     workflow?: Record<string, JsonValue>
     next_action?: Record<string, JsonValue>
@@ -48,42 +71,6 @@ interface ToolEnvelope {
   }
   error?: ToolFailure
 }
-
-interface PaperSummary {
-  paper_id: string
-  paper_title: string
-  local_path: string
-  source_type: SourceType
-  chunk_count: number
-}
-
-interface ToolEvidenceChunk {
-  chunk_id: string
-  page?: number
-  text: string
-}
-
-const chunkSchema = {
-  type: 'object',
-  additionalProperties: false,
-  properties: {
-    chunk_id: { type: 'string', required: true },
-    page: { type: 'integer' },
-    text: { type: 'string', required: true },
-  },
-} as const satisfies ValueSchemaSpec
-
-const paperSummarySchema = {
-  type: 'object',
-  additionalProperties: false,
-  properties: {
-    paper_id: { type: 'string', required: true },
-    paper_title: { type: 'string', required: true },
-    local_path: { type: 'string', required: true },
-    source_type: { type: 'string', required: true, enum: SOURCE_TYPES },
-    chunk_count: { type: 'integer', required: true },
-  },
-} as const satisfies ValueSchemaSpec
 
 const runSchema = {
   type: 'object',
@@ -123,8 +110,6 @@ const outputSchema = {
       properties: {
         run: runSchema,
         runs: { type: 'array', items: runSchema },
-        paper: paperSummarySchema,
-        chunk: chunkSchema,
         verification: {
           type: 'object',
           additionalProperties: false,
@@ -133,6 +118,7 @@ const outputSchema = {
             paper_id: { type: 'string', required: true },
             chunk_id: { type: 'string', required: true },
             local_path: { type: 'string', required: true },
+            evidence_kind: { type: 'string', required: true, enum: ['abstract', 'full_text'] },
           },
         },
         workflow: { type: 'object', additionalProperties: true },
@@ -215,6 +201,34 @@ function domainError(error: SupraMasError | SupraMasDomainError): ToolEnvelope {
       },
     }
   }
+  if (error.code === 'SUPRAMAS_EVIDENCE_POLICY_VIOLATION') {
+    return {
+      status: 'error',
+      summary: error.message,
+      next_actions: ['import_full_text_and_rebuild_candidate'],
+      artifacts: [],
+      error: {
+        code: error.code,
+        root_cause_hint: error.message,
+        safe_retry: 'Use supramas_paper_import for a verified open-access PDF, then rebuild the same candidate from full-text chunks.',
+        stop_condition: 'Do not accept, finalize, or replace missing full text with a search abstract.',
+      },
+    }
+  }
+  if (error.code === 'SUPRAMAS_EDGE_TYPE_MISMATCH') {
+    return {
+      status: 'error',
+      summary: error.message,
+      next_actions: ['downgrade_edge_or_revise'],
+      artifacts: [],
+      error: {
+        code: error.code,
+        root_cause_hint: error.message,
+        safe_retry: 'Revise the edge so full maps to direct, partial to transferable, or adjacent to exploratory.',
+        stop_condition: 'Do not accept a child whose declared expectation satisfaction disagrees with its edge type.',
+      },
+    }
+  }
   if (error.code === 'SUPRAMAS_DUPLICATE_ID') {
     return {
       status: 'error',
@@ -249,24 +263,6 @@ async function guard(action: () => ToolEnvelope | Promise<ToolEnvelope>): Promis
   } catch (error) {
     if (error instanceof SupraMasError || error instanceof SupraMasDomainError) return domainError(error)
     throw error
-  }
-}
-
-function summarizePaper(artifact: PaperArtifact): PaperSummary {
-  return {
-    paper_id: artifact.paper_id,
-    paper_title: artifact.paper_title,
-    local_path: artifact.local_path,
-    source_type: artifact.source_type,
-    chunk_count: artifact.chunks.length,
-  }
-}
-
-function modelChunk(chunk: EvidenceChunk): ToolEvidenceChunk {
-  return {
-    chunk_id: chunk.chunk_id,
-    ...(chunk.page === undefined || chunk.page === null ? {} : { page: chunk.page }),
-    text: chunk.text,
   }
 }
 
@@ -319,8 +315,337 @@ const reviewFindingSchema = {
   },
 } as const satisfies ValueSchemaSpec
 
+const evidenceRefSchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    chunk_id: { type: 'string', required: true, description: 'Exact imported local chunk id.' },
+    page: { type: 'integer', description: 'One-based source page when available.' },
+    evidence_text: { type: 'string', required: true, description: 'Literal quote contained in the referenced chunk.' },
+  },
+} as const satisfies ValueSchemaSpec
+
+const strategyRecordSchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    record_id: { type: 'string', required: true, description: 'Stable paper-local strategy record id.' },
+    tuning_dimension: {
+      type: 'string',
+      required: true,
+      enum: TUNING_DIMENSIONS,
+      description: 'Exactly one closed dominant SupraMAS tuning dimension.',
+    },
+    tuning_strategy: { type: 'string', required: true, description: 'Evidence-supported material tuning action.' },
+    tuning_effect: { type: 'string', required: true, description: 'Evidence-supported observed effect of the tuning action.' },
+    evidence: { ...evidenceRefSchema, required: true },
+    confidence: { type: 'number', required: true, description: 'Record confidence from 0 to 1.' },
+  },
+} as const satisfies ValueSchemaSpec
+
+const limitationRecordSchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    limitation_id: { type: 'string', required: true, description: 'Stable paper-local limitation id.' },
+    limitation: { type: 'string', required: true, description: 'Evidence-supported limitation of the reported strategy.' },
+    expectation: { type: 'string', required: true, description: 'Specific improvement expectation used for child expansion.' },
+    related_record_ids: {
+      type: 'array',
+      items: { type: 'string' },
+      description: 'Optional strategy record ids constrained by this limitation.',
+    },
+    evidence: { ...evidenceRefSchema, required: true },
+    confidence: { type: 'number', required: true, description: 'Limitation confidence from 0 to 1.' },
+  },
+} as const satisfies ValueSchemaSpec
+
+const paperNodeDraftSchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    paper_id: { type: 'string', required: true, description: 'Exact id of one imported paper artifact.' },
+    paper_title: { type: 'string', required: true, description: 'Verified publication title.' },
+    year: { type: 'integer', description: 'Publication year when verified.' },
+    doi: { type: 'string', description: 'Verified DOI when available.' },
+    url: { type: 'string', description: 'Verified public landing URL when available.' },
+    source_type: { type: 'string', enum: SOURCE_TYPES, description: 'Scientific source classification.' },
+    notes: { type: 'array', items: { type: 'string' }, description: 'Concise node-level caveats.' },
+    strategy_records: {
+      type: 'array',
+      required: true,
+      items: strategyRecordSchema,
+      description: 'One or more evidence-supported tuning records using the closed schema.',
+    },
+    limitation_records: {
+      type: 'array',
+      required: true,
+      items: limitationRecordSchema,
+      description: 'One or more evidence-supported limitation/expectation records.',
+    },
+  },
+} as const satisfies ValueSchemaSpec
+
+const proposedStrategyEdgeSchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    parent_limitation_id: { type: 'string', required: true, description: 'Open parent limitation id from next_action.' },
+    child_record_id: { type: 'string', description: 'Child strategy record that answers the parent expectation.' },
+    child_tuning_effect: { type: 'string', description: 'Evidence-supported child effect relevant to the bridge.' },
+    edge_type: { type: 'string', required: true, enum: EDGE_TYPES, description: 'Proposed expectation relationship.' },
+    edge_rationale: { type: 'string', required: true, description: 'Scientific rationale for the parent-to-child bridge.' },
+    confidence: { type: 'number', required: true, description: 'Edge confidence from 0 to 1.' },
+  },
+} as const satisfies ValueSchemaSpec
+
+const builderHandoffSchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    paper_node: {
+      required: true,
+      oneOf: [paperNodeDraftSchema, { type: 'null' }],
+      description: 'Complete paper draft, or null when no supported full-text candidate exists.',
+    },
+    edge: {
+      required: true,
+      oneOf: [proposedStrategyEdgeSchema, { type: 'null' }],
+      description: 'Complete child bridge, or null for a root or unsupported bridge.',
+    },
+    reason: { type: 'string', description: 'Evidence-based explanation for a null candidate or edge.' },
+    notes: { type: 'array', required: true, items: { type: 'string' } },
+  },
+} as const satisfies ValueSchemaSpec
+
+const reviewerHandoffSchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    decision: { type: 'string', required: true, enum: ['accept', 'revise', 'reject'] },
+    expectation_satisfaction: {
+      type: 'string',
+      required: true,
+      enum: ['not_applicable', 'full', 'partial', 'adjacent', 'none'],
+    },
+    summary: { type: 'string', required: true },
+    critical_issues: { type: 'array', required: true, items: reviewFindingSchema },
+    edge_issues: { type: 'array', required: true, items: reviewFindingSchema },
+    acceptance_conditions: { type: 'array', required: true, items: { type: 'string' } },
+  },
+} as const satisfies ValueSchemaSpec
+
+const BUILDER_PERSONA = `You are the SupraMAS Stage 1 strategy builder. Execute exactly one bounded
+build_root, build_child, or revise_candidate action from the supplied durable state. When
+available_imported_papers is non-empty, choose exactly one listed paper, do not search or import, and read
+only the bounded chunks needed for the result. When it is empty, make at most one search request and at
+most two import attempts, then stop discovery after the first supported full-text candidate. Search
+abstracts are discovery metadata and must never be cited. Every evidence_text must be a literal substring
+of its cited full_text chunk. Before returning, call supramas_evidence_verify for every proposed evidence
+quote and correct any mismatch against supramas_chunk_read; never return an unverified quote. On revision,
+keep the same paper and address every reviewer condition. Never review, accept, submit workflow state, or
+assemble a tree. Finish promptly with exactly one structured result matching the required schema; use null
+paper_node when no supported full-text candidate exists and null edge for a root or unsupported child bridge.
+For a child edge, copy parent_node_id, parent_limitation_id, and parent_expectation exactly from next_action;
+choose child_record_id from paper_node.strategy_records and copy child_tuning_effect byte-for-byte from that
+same record. Self-check these edge links before returning.`
+
+const REVIEWER_PERSONA = `You are the independent SupraMAS Stage 1 evidence reviewer. Review exactly one
+pending paper candidate and proposed edge from the supplied durable state. Read the local chunks and use
+supramas_evidence_verify for every cited quote. Never mutate evidence, search for replacement papers,
+submit workflow state, or assemble a tree. Root reviews use not_applicable. For children, full maps to
+direct, partial to transferable, adjacent to exploratory, and none cannot be accepted. An accept decision
+must have empty critical_issues, edge_issues, and acceptance_conditions; return revise or reject whenever
+required work remains. Report exactly one final structured result matching the required schema.`
+
+type StructuredSchema = NonNullable<SubagentStartRequest['outputSchema']>
+
+interface StructuredDelegation<T> {
+  runId: string
+  value: T
+}
+
+async function delegateStructured<T>(
+  ctx: Context,
+  exec: ToolRunContext,
+  options: {
+    provider: string
+    label: string
+    prompt: string
+    persona: string
+    toolFilter: { allow: string[] }
+    schema: ValueSchemaSpec
+    timeoutMs: number
+  },
+): Promise<StructuredDelegation<T>> {
+  if (exec.agent === undefined) {
+    throw new Error('orchestrated SupraMAS handoff requires a calling agent')
+  }
+  const subagents = ctx.get('subagents')
+  if (subagents === undefined) {
+    throw new Error('orchestrated SupraMAS handoff requires the subagents service')
+  }
+  const run = await subagents.start(options.provider, {
+    label: options.label,
+    prompt: [{ type: 'text', text: options.prompt }],
+    parent: exec.agent,
+    signal: AbortSignal.any([exec.signal, AbortSignal.timeout(options.timeoutMs)]),
+    outputSchema: valueSchemaSpecToJsonSchema(options.schema) as StructuredSchema,
+    maxDepth: 1,
+    persona: options.persona,
+    toolFilter: options.toolFilter,
+  })
+  try {
+    const result = await run.result
+    if (result.stopReason !== 'completed') {
+      throw new Error(
+        `SupraMAS ${options.label} subagent ended with ${result.stopReason}`
+        + (result.diagnostic === undefined ? '' : `: ${result.diagnostic}`),
+      )
+    }
+    if (result.structured === undefined) {
+      throw new Error(`SupraMAS ${options.label} subagent returned no structured handoff`)
+    }
+    return {
+      runId: String(run.id),
+      value: structuredClone(result.structured) as T,
+    }
+  } finally {
+    await run.dispose()
+  }
+}
+
+interface HandoffPaperSummary {
+  paper_id: string
+  paper_title: string
+  local_path: string
+  source_type: string
+  page_count: number
+  chunk_count: number
+}
+
+function summarizePaper(paper: PaperArtifact): HandoffPaperSummary {
+  return {
+    paper_id: paper.paper_id,
+    paper_title: paper.paper_title,
+    local_path: paper.local_path,
+    source_type: paper.source_type,
+    page_count: paper.full_text_source?.page_count ?? 0,
+    chunk_count: paper.chunks.length,
+  }
+}
+
+function searchTerms(value: string): string[] {
+  return value.toLowerCase().match(/[\p{L}\p{N}]+/gu)?.filter(term => term.length >= 4) ?? []
+}
+
+function builderQuery(state: Stage1RunState): string {
+  if (state.nextAction.kind === 'build_child') {
+    const action = state.nextAction
+    const parent = state.workflow.nodes.find(node => node.node_id === action.parent_node_id)
+    const limitation = parent?.limitation_records.find(record =>
+      record.limitation_id === action.parent_limitation_id)
+    return [limitation?.limitation, action.parent_expectation].filter(Boolean).join(' ')
+  }
+  return [
+    state.workflow.config.researchTopic,
+    ...(state.workflow.config.materialScope ?? []),
+    ...(state.workflow.config.targetProperty ?? []),
+  ].join(' ')
+}
+
+function paperRelevance(paper: PaperArtifact, terms: string[]): number {
+  const titleTerms = searchTerms(paper.paper_title)
+  return terms.reduce((score, term) => score + titleTerms.reduce((best, titleTerm) =>
+    Math.max(best, titleTerm.includes(term) || term.includes(titleTerm) ? Math.min(term.length, titleTerm.length) : 0),
+  0), 0)
+}
+
+function availableBuilderPapers(state: Stage1RunState, papers: PaperArtifact[]): HandoffPaperSummary[] {
+  const fullTextPapers = papers.filter(paper =>
+    paper.full_text_source !== undefined
+    && paper.chunks.some(chunk => chunk.evidence_kind === 'full_text'),
+  )
+  if (state.nextAction.kind === 'revise_candidate') {
+    const paperId = state.nextAction.paper_id
+    return fullTextPapers
+      .filter(paper => paper.paper_id === paperId)
+      .map(summarizePaper)
+  }
+  const used = new Set([
+    ...state.workflow.nodes.map(node => node.paper_id),
+    ...state.workflow.builder_attempts.flatMap(attempt =>
+      attempt.paper_id === undefined ? [] : [attempt.paper_id]),
+  ])
+  const terms = searchTerms(builderQuery(state))
+  const ranked = fullTextPapers
+    .filter(paper => !used.has(paper.paper_id))
+    .map((paper, index) => ({ paper, index, score: paperRelevance(paper, terms) }))
+    .sort((left, right) => right.score - left.score || left.index - right.index)
+  const frontierKey = state.nextAction.kind === 'build_child'
+    ? `${state.nextAction.parent_node_id}:${state.nextAction.parent_limitation_id}`
+    : undefined
+  const priorEmptyAttempts = state.workflow.builder_attempts.filter(attempt =>
+    attempt.paper_id === undefined
+    && (frontierKey === undefined ? attempt.scope === 'root' : attempt.frontier_key === frontierKey),
+  ).length
+  const selected = ranked[priorEmptyAttempts] ?? ranked[0]
+  return selected === undefined ? [] : [summarizePaper(selected.paper)]
+}
+
+function reviewerPapers(state: Stage1RunState, papers: PaperArtifact[]): HandoffPaperSummary[] {
+  const paperId = state.workflow.pending_candidate?.node.paper_id
+  if (paperId === undefined) return []
+  return papers.filter(paper => paper.paper_id === paperId).map(summarizePaper)
+}
+
+function handoffPrompt(
+  kind: 'builder' | 'reviewer',
+  state: Stage1RunState,
+  availablePapers: HandoffPaperSummary[],
+): string {
+  return [
+    `Execute the ${kind} handoff for the only legal next action below.`,
+    'Use the exact run_id and paper ids shown in this payload.',
+    JSON.stringify({
+      run_id: state.run.id,
+      job_id: state.run.jobId,
+      revision: state.run.revision,
+      workflow: state.workflow,
+      next_action: state.nextAction,
+      available_imported_papers: availablePapers,
+    }, null, 2),
+  ].join('\n\n')
+}
+
+function handoffFailureEnvelope(
+  state: Stage1RunState,
+  kind: 'builder' | 'reviewer',
+  error: unknown,
+): ToolEnvelope {
+  const detail = (error instanceof Error ? error.message : String(error)).replaceAll(/\s+/g, ' ').slice(0, 1_000)
+  return {
+    status: 'error',
+    summary: `SupraMAS ${kind} handoff failed before state mutation: ${detail}`,
+    next_actions: ['stop_current_session_and_resume_same_revision'],
+    artifacts: [state.run.runDir],
+    data: {
+      run: state.run,
+      workflow: jsonObject(state.workflow),
+      next_action: jsonObject(state.nextAction),
+    },
+    error: {
+      code: 'SUPRAMAS_SUBAGENT_HANDOFF_FAILED',
+      root_cause_hint: detail,
+      safe_retry: `Resume later with run_id ${state.run.id} at revision ${state.run.revision}; retry once in a new process.`,
+      stop_condition: `Do not call the ${kind} submit tool again in this process for the same revision.`,
+    },
+  }
+}
+
 /** Register narrow run controls and provenance-bound Stage 1 evidence tools. */
-export function apply(ctx: Context): void {
+export function apply(ctx: Context, config: Config): void {
+  const failedHandoffs = new Set<string>()
   ctx.tools.register(defineTool({
     name: 'supramas_run_create',
     description: 'Create one deterministic, revisioned SupraMAS material-science run.',
@@ -488,6 +813,7 @@ export function apply(ctx: Context): void {
             maxChildAttemptsPerLimitation: args.max_child_attempts_per_limitation,
             ...(args.max_branch_per_node === undefined ? {} : { maxBranchPerNode: args.max_branch_per_node }),
             ...(args.target_child_nodes === undefined ? {} : { targetChildNodes: args.target_child_nodes }),
+            requireAgentHandoffs: config.mode !== 'direct',
           },
         )
         await ctx.supramasArtifacts.syncTask(state.run.id)
@@ -518,71 +844,185 @@ export function apply(ctx: Context): void {
     },
   }))
 
-  ctx.tools.register(defineTool({
-    name: 'supramas_stage1_builder_submit',
-    description: 'Submit one builder attempt; candidates remain unaccepted until reviewer approval.',
-    parameters: {
-      run_id: { type: 'string', required: true, description: 'Owning deterministic SupraMAS run id.' },
-      revision: { type: 'integer', required: true, description: 'Exact current run revision.' },
-      paper_node: {
-        type: 'object',
-        additionalProperties: true,
-        description: 'Complete paper-node draft, omitted only when no supported candidate was found.',
+  if (config.mode === 'direct') {
+    ctx.tools.register(defineTool({
+      name: 'supramas_stage1_builder_submit',
+      description: 'Submit one trusted builder attempt directly; candidates still require reviewer approval.',
+      parameters: {
+        run_id: { type: 'string', required: true, description: 'Owning deterministic SupraMAS run id.' },
+        revision: { type: 'integer', required: true, description: 'Exact current run revision.' },
+        paper_node: {
+          ...paperNodeDraftSchema,
+          description: 'Complete paper-node draft, omitted only when no supported candidate was found.',
+        },
+        edge: {
+          ...proposedStrategyEdgeSchema,
+          description: 'Complete proposed child edge; omit for a root or unsupported child bridge.',
+        },
+        reason: { type: 'string', description: 'Evidence-based reason for an empty candidate or edge.' },
+        notes: { type: 'array', items: { type: 'string' }, description: 'Concise builder handoff notes.' },
       },
-      edge: {
-        type: 'object',
-        additionalProperties: true,
-        description: 'Complete proposed child edge; omit for a root or unsupported child bridge.',
+      output,
+      async execute(args) {
+        return guard(async () => {
+          const state = await ctx.supramas.submitStage1Builder(
+            { id: SupraMasRunId(args.run_id), revision: args.revision },
+            {
+              paper_node: args.paper_node === undefined ? null : args.paper_node,
+              edge: args.edge === undefined ? null : args.edge,
+              ...(args.reason === undefined ? {} : { reason: args.reason }),
+              notes: args.notes ?? [],
+            },
+          )
+          return stage1Envelope(state, `Recorded trusted builder attempt for ${state.run.jobId}.`)
+        })
       },
-      reason: { type: 'string', description: 'Evidence-based reason for an empty candidate or edge.' },
-      notes: { type: 'array', items: { type: 'string' }, description: 'Concise builder handoff notes.' },
-    },
-    output,
-    async execute(args) {
-      return guard(async () => {
-        const state = await ctx.supramas.submitStage1Builder(
-          { id: SupraMasRunId(args.run_id), revision: args.revision },
-          {
-            paper_node: args.paper_node === undefined ? null : args.paper_node as unknown as PaperNodeDraft,
-            edge: args.edge === undefined ? null : args.edge as unknown as ProposedStrategyEdge,
-            ...(args.reason === undefined ? {} : { reason: args.reason }),
-            notes: args.notes ?? [],
-          },
-        )
-        return stage1Envelope(state, `Recorded builder attempt for ${state.run.jobId}.`)
-      })
-    },
-  }))
+    }))
 
-  ctx.tools.register(defineTool({
-    name: 'supramas_stage1_reviewer_submit',
-    description: 'Submit an accept, revise, or reject decision for the current pending candidate.',
-    parameters: {
-      run_id: { type: 'string', required: true, description: 'Owning deterministic SupraMAS run id.' },
-      revision: { type: 'integer', required: true, description: 'Exact current run revision.' },
-      decision: { type: 'string', required: true, enum: ['accept', 'revise', 'reject'] },
-      summary: { type: 'string', required: true, description: 'Evidence-grounded review summary.' },
-      critical_issues: { type: 'array', required: true, items: reviewFindingSchema },
-      edge_issues: { type: 'array', required: true, items: reviewFindingSchema },
-      acceptance_conditions: { type: 'array', required: true, items: { type: 'string' } },
-    },
-    output,
-    async execute(args) {
-      return guard(async () => {
-        const state = await ctx.supramas.submitStage1Review(
-          { id: SupraMasRunId(args.run_id), revision: args.revision },
-          {
-            decision: args.decision,
-            summary: args.summary,
-            critical_issues: args.critical_issues,
-            edge_issues: args.edge_issues,
-            acceptance_conditions: args.acceptance_conditions,
-          },
-        )
-        return stage1Envelope(state, `Recorded reviewer decision for ${state.run.jobId}.`)
-      })
-    },
-  }))
+    ctx.tools.register(defineTool({
+      name: 'supramas_stage1_reviewer_submit',
+      description: 'Submit one trusted reviewer decision directly.',
+      parameters: {
+        run_id: { type: 'string', required: true, description: 'Owning deterministic SupraMAS run id.' },
+        revision: { type: 'integer', required: true, description: 'Exact current run revision.' },
+        decision: { type: 'string', required: true, enum: ['accept', 'revise', 'reject'] },
+        expectation_satisfaction: {
+          type: 'string',
+          required: true,
+          enum: ['not_applicable', 'full', 'partial', 'adjacent', 'none'],
+          description: 'Root uses not_applicable; child coverage maps full/direct, partial/transferable, adjacent/exploratory.',
+        },
+        summary: { type: 'string', required: true, description: 'Evidence-grounded review summary.' },
+        critical_issues: { type: 'array', required: true, items: reviewFindingSchema },
+        edge_issues: { type: 'array', required: true, items: reviewFindingSchema },
+        acceptance_conditions: { type: 'array', required: true, items: { type: 'string' } },
+      },
+      output,
+      async execute(args) {
+        return guard(async () => {
+          const state = await ctx.supramas.submitStage1Review(
+            { id: SupraMasRunId(args.run_id), revision: args.revision },
+            {
+              decision: args.decision,
+              expectation_satisfaction: args.expectation_satisfaction,
+              summary: args.summary,
+              critical_issues: args.critical_issues,
+              edge_issues: args.edge_issues,
+              acceptance_conditions: args.acceptance_conditions,
+            },
+          )
+          return stage1Envelope(state, `Recorded trusted reviewer decision for ${state.run.jobId}.`)
+        })
+      },
+    }))
+  } else {
+    ctx.tools.register(defineTool({
+      name: 'supramas_stage1_builder_submit',
+      description: 'Atomically delegate the current build action and persist the structured builder handoff.',
+      parameters: {
+        run_id: { type: 'string', required: true, description: 'Owning deterministic SupraMAS run id.' },
+        revision: { type: 'integer', required: true, description: 'Exact current run revision.' },
+      },
+      output,
+      async execute(args, exec) {
+        return guard(async () => {
+          const runId = SupraMasRunId(args.run_id)
+          const current = ctx.supramas.getStage1(runId)
+          if (current === undefined) {
+            throw new SupraMasError(`SupraMAS run ${args.run_id} has no Stage 1 workflow.`, 'SUPRAMAS_INVALID_REQUEST')
+          }
+          if (current.run.revision !== args.revision) {
+            throw new SupraMasError(
+              `SupraMAS run ${args.run_id} expected revision ${current.run.revision}, received ${args.revision}.`,
+              'SUPRAMAS_STALE_REVISION',
+            )
+          }
+          const handoffKey = `builder:${runId}:${args.revision}`
+          if (failedHandoffs.has(handoffKey)) {
+            return handoffFailureEnvelope(current, 'builder', 'a prior builder handoff already failed in this process')
+          }
+          const availablePapers = availableBuilderPapers(current, ctx.supramas.listPapers(runId))
+          const allowDiscovery = availablePapers.length === 0 && current.nextAction.kind !== 'revise_candidate'
+          try {
+            const handoff = await delegateStructured<Stage1BuilderSubmission>(ctx, exec, {
+              provider: config.subagentProvider ?? 'spawn',
+              label: 'SupraMAS Stage 1 builder',
+              prompt: handoffPrompt('builder', current, availablePapers),
+              persona: BUILDER_PERSONA,
+              schema: builderHandoffSchema,
+              timeoutMs: config.handoffTimeoutMs ?? 600_000,
+              toolFilter: {
+                allow: [
+                  ...(allowDiscovery ? ['supramas_literature_search', 'supramas_paper_import'] : []),
+                  'supramas_chunk_list',
+                  'supramas_chunk_read',
+                  'supramas_evidence_verify',
+                ],
+              },
+            })
+            const state = await ctx.supramas.submitStage1Builder(
+              { id: runId, revision: args.revision },
+              { ...handoff.value, builder_run_id: handoff.runId },
+            )
+            return stage1Envelope(state, `Recorded attested builder handoff for ${state.run.jobId}.`)
+          } catch (error) {
+            failedHandoffs.add(handoffKey)
+            return handoffFailureEnvelope(current, 'builder', error)
+          }
+        })
+      },
+    }))
+
+    ctx.tools.register(defineTool({
+      name: 'supramas_stage1_reviewer_submit',
+      description: 'Atomically delegate independent review and persist the structured reviewer handoff.',
+      parameters: {
+        run_id: { type: 'string', required: true, description: 'Owning deterministic SupraMAS run id.' },
+        revision: { type: 'integer', required: true, description: 'Exact current run revision.' },
+      },
+      output,
+      async execute(args, exec) {
+        return guard(async () => {
+          const runId = SupraMasRunId(args.run_id)
+          const current = ctx.supramas.getStage1(runId)
+          if (current === undefined) {
+            throw new SupraMasError(`SupraMAS run ${args.run_id} has no Stage 1 workflow.`, 'SUPRAMAS_INVALID_REQUEST')
+          }
+          if (current.run.revision !== args.revision) {
+            throw new SupraMasError(
+              `SupraMAS run ${args.run_id} expected revision ${current.run.revision}, received ${args.revision}.`,
+              'SUPRAMAS_STALE_REVISION',
+            )
+          }
+          const handoffKey = `reviewer:${runId}:${args.revision}`
+          if (failedHandoffs.has(handoffKey)) {
+            return handoffFailureEnvelope(current, 'reviewer', 'a prior reviewer handoff already failed in this process')
+          }
+          try {
+            const handoff = await delegateStructured<Stage1ReviewSubmission>(ctx, exec, {
+              provider: config.subagentProvider ?? 'spawn',
+              label: 'SupraMAS Stage 1 reviewer',
+              prompt: handoffPrompt('reviewer', current, reviewerPapers(current, ctx.supramas.listPapers(runId))),
+              persona: REVIEWER_PERSONA,
+              schema: reviewerHandoffSchema,
+              timeoutMs: config.handoffTimeoutMs ?? 600_000,
+              toolFilter: {
+                allow: ['supramas_chunk_list', 'supramas_chunk_read', 'supramas_evidence_verify'],
+              },
+            })
+            const state = await ctx.supramas.submitStage1Review(
+              { id: runId, revision: args.revision },
+              { ...handoff.value, reviewer_run_id: handoff.runId },
+            )
+            return stage1Envelope(state, `Recorded attested reviewer handoff for ${state.run.jobId}.`)
+          } catch (error) {
+            failedHandoffs.add(handoffKey)
+            return handoffFailureEnvelope(current, 'reviewer', error)
+          }
+        })
+      },
+    }))
+  }
 
   ctx.tools.register(defineTool({
     name: 'supramas_stage1_finalize',
@@ -627,99 +1067,6 @@ export function apply(ctx: Context): void {
           next_actions: run.phase === 'completed' ? ['inspect_exported_artifacts'] : ['continue_run'],
           artifacts: files,
           data: { run },
-        }
-      })
-    },
-  }))
-
-  ctx.tools.register(defineTool({
-    name: 'supramas_paper_store',
-    description: 'Register one verified paper artifact at its canonical run-local papers path.',
-    parameters: {
-      run_id: { type: 'string', required: true, description: 'Owning deterministic SupraMAS run id.' },
-      paper_id: { type: 'string', required: true, description: 'Stable paper identity used by one tree node.' },
-      paper_title: { type: 'string', required: true, description: 'Verified publication title.' },
-      local_path: { type: 'string', required: true, description: 'Canonical runs/<job_id>/papers/<paper_id>.json path.' },
-      source_type: { type: 'string', required: true, enum: SOURCE_TYPES, description: 'Scientific source classification.' },
-    },
-    output,
-    async execute(args) {
-      return guard(async () => {
-        const runId = SupraMasRunId(args.run_id)
-        const artifact = await ctx.supramas.storePaper(runId, {
-          paper_id: args.paper_id,
-          paper_title: args.paper_title,
-          local_path: args.local_path,
-          source_type: args.source_type,
-        })
-        await ctx.supramasArtifacts.syncPaper(runId, artifact.paper_id)
-        return {
-          status: 'success',
-          summary: `Registered local paper ${artifact.paper_id}.`,
-          next_actions: ['extract_evidence_chunks'],
-          artifacts: [artifact.local_path],
-          data: { paper: summarizePaper(artifact) },
-        }
-      })
-    },
-  }))
-
-  ctx.tools.register(defineTool({
-    name: 'supramas_chunk_extract',
-    description: 'Persist one page-aware evidence chunk under an already registered local paper.',
-    parameters: {
-      run_id: { type: 'string', required: true, description: 'Owning deterministic SupraMAS run id.' },
-      paper_id: { type: 'string', required: true, description: 'Owning registered paper identity.' },
-      chunk_id: { type: 'string', required: true, description: 'Globally unique run-local chunk identity.' },
-      page: { type: 'integer', description: 'One-based source page when available.' },
-      text: { type: 'string', required: true, description: 'Full persisted chunk text, not a paraphrase.' },
-    },
-    output,
-    async execute(args) {
-      return guard(async () => {
-        const runId = SupraMasRunId(args.run_id)
-        const chunk = await ctx.supramas.addEvidenceChunk(runId, args.paper_id, {
-          chunk_id: args.chunk_id,
-          ...(args.page === undefined ? {} : { page: args.page }),
-          text: args.text,
-        })
-        const artifact = ctx.supramas.readPaper(runId, args.paper_id)
-        if (artifact === undefined) throw new Error(`stored paper ${args.paper_id} disappeared`)
-        await ctx.supramasArtifacts.syncPaper(runId, args.paper_id)
-        return {
-          status: 'success',
-          summary: `Stored evidence chunk ${chunk.chunk_id}.`,
-          next_actions: ['extract_more_chunks_or_build_record'],
-          artifacts: [artifact.local_path],
-          data: { chunk: modelChunk(chunk) },
-        }
-      })
-    },
-  }))
-
-  ctx.tools.register(defineTool({
-    name: 'supramas_artifact_read',
-    description: 'Read bounded metadata for one run-local paper without returning its full evidence text.',
-    parameters: {
-      run_id: { type: 'string', required: true, description: 'Owning deterministic SupraMAS run id.' },
-      paper_id: { type: 'string', required: true, description: 'Registered paper identity.' },
-    },
-    output,
-    async execute(args) {
-      return guard(() => {
-        const artifact = ctx.supramas.readPaper(SupraMasRunId(args.run_id), args.paper_id)
-        if (artifact === undefined) {
-          throw new SupraMasDomainError(
-            `paper ${args.paper_id} has no local artifact`,
-            'SUPRAMAS_EVIDENCE_MISSING',
-          )
-        }
-        return {
-          status: 'success',
-          summary: `Loaded local paper ${artifact.paper_id}.`,
-          next_actions: ['list_or_read_bounded_evidence_chunks'],
-          artifacts: [artifact.local_path],
-          data: { paper: summarizePaper(artifact) },
         }
       })
     },

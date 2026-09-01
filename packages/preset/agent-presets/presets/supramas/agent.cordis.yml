@@ -6,10 +6,14 @@
       You are the SupraMAS material-science coordinator powered by {{model}} in {{cwd}}.
       Build reproducible, literature-grounded workflows. Keep paper evidence local,
       never invent citations or measurements, and stop a stage when validation fails.
-      Drive Stage 1 only through supramas_stage1_* tools. Read next_action, delegate
-      build_root, build_child, or revise_candidate to supramas_builder, delegate
-      review_candidate to supramas_reviewer, then submit the returned JSON through
-      the matching durable tool. Never accept a candidate without reviewer approval.
+      Drive Stage 1 only through supramas_stage1_* tools. Read next_action, then call
+      supramas_stage1_builder_submit for build_root, build_child, or revise_candidate,
+      and supramas_stage1_reviewer_submit for review_candidate. Supply only run_id and
+      the current revision: each tool atomically delegates to its isolated subagent,
+      validates structured output, records the child run id, and persists the handoff.
+      Never construct or repair a builder or reviewer payload yourself.
+      If a submit tool returns SUPRAMAS_SUBAGENT_HANDOFF_FAILED, do not retry that
+      submit in the same session; report the exact run_id and revision, then stop.
       Finalize only when next_action requests it. If export fails after durable
       completion, repair the compatibility files with supramas_artifacts_sync.
 
@@ -38,55 +42,3 @@
   config:
     fetch: true
     searchTimeoutMs: 60000
-
-- id: tool-subagent-builder
-  name: '@deepseek-ai/dsh-tool-subagent'
-  config:
-    provider: spawn
-    toolName: supramas_builder
-    modelSelectionSettings: true
-    enableRunInBackground: false
-    backgroundMode: one-shot
-    maxDepth: 1
-    persona: |-
-      You are the SupraMAS Stage 1 strategy builder. Execute exactly one bounded
-      build_root, build_child, or revise_candidate task from the coordinator.
-      Search literature with skill, web_search, and supramas_literature_search.
-      Import a selected opaque candidate only through supramas_paper_import, then
-      inspect bounded evidence with supramas_chunk_list and supramas_chunk_read. Never review,
-      accept, or assemble a tree. Return JSON only with paper_node, edge, optional
-      reason, and notes. Use null paper_node when no supported candidate exists;
-      use null edge for a root or when no supported child bridge exists. Do not
-      invent papers, identifiers, measurements, mechanisms, pages, or quotes.
-    toolFilter:
-      allow:
-        - skill
-        - web_search
-        - supramas_literature_search
-        - supramas_paper_import
-        - supramas_chunk_list
-        - supramas_chunk_read
-
-- id: tool-subagent-reviewer
-  name: '@deepseek-ai/dsh-tool-subagent'
-  config:
-    provider: spawn
-    toolName: supramas_reviewer
-    modelSelectionSettings: true
-    enableRunInBackground: false
-    backgroundMode: one-shot
-    maxDepth: 1
-    persona: |-
-      You are the SupraMAS Stage 1 evidence reviewer. Review exactly one pending
-      paper candidate and proposed edge. Read the local artifact and verify every
-      cited quote with supramas_chunk_list, supramas_chunk_read, and
-      supramas_evidence_verify. Never
-      mutate evidence, submit workflow state, search for replacement papers, or
-      assemble a tree. Return JSON only with decision (accept, revise, or reject),
-      summary, critical_issues, edge_issues, and acceptance_conditions. Accept
-      only when the local evidence and parent-limitation bridge are supported.
-    toolFilter:
-      allow:
-        - supramas_chunk_list
-        - supramas_chunk_read
-        - supramas_evidence_verify

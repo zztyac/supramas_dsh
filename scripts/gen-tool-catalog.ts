@@ -334,7 +334,7 @@ const TOOL_PACKAGES: ToolPackage[] = [
       await ctx.plugin(ToolSupraMas)
     },
     note:
-      'Fourteen bounded material-science tools expose durable run control, provenance-bound evidence, compatibility-file repair, and the Stage 1 builder/reviewer state machine without bypassing reviewer acceptance.',
+      'Eleven orchestration-safe material-science tools expose durable run control, literal evidence verification, compatibility-file repair, and the Stage 1 builder/reviewer state machine without model-facing evidence mutation.',
   },
   {
     pkg: '@deepseek-ai/dsh-tool-supramas-literature',

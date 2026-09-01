@@ -30,7 +30,7 @@ Mount it after `ctx.tools`, `ctx.supramas`, `ctx.supramasLiterature`, and `ctx.s
     maxChunkReadChars: 20000
 ```
 
-Builder roles receive `supramas_literature_search`, `supramas_paper_import`, `supramas_chunk_list`, and `supramas_chunk_read`. Reviewer roles receive only the list/read tools plus the separate literal evidence verifier.
+Builder roles receive `supramas_literature_search`, `supramas_paper_import`, `supramas_chunk_list`, and `supramas_chunk_read`. Reviewer roles receive only the list/read tools plus the separate literal evidence verifier. Search abstracts are discovery metadata only; a builder must successfully import a complete PDF before submitting a node.
 
 ## Model Experience
 
@@ -52,7 +52,7 @@ The allowed tool definitions are stable and cacheable. Each invocation appends o
 
 - Search currently depends on the mounted structured-index provider set.
 - Chunk pagination is character-based, not token-based.
-- Administrative legacy paper/chunk mutation tools remain for compatibility but are absent from Builder and Reviewer allowlists.
+- Import failures return recovery guidance to select another open-access candidate or refine the query; they never authorize abstract fallback.
 
 ### Dev Note
 

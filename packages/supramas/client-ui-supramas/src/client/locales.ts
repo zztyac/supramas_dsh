@@ -83,6 +83,7 @@ export const zh = {
   'notice.resumed': '任务已恢复，并已继续执行。',
   'notice.cancelled': '任务已取消。',
   'notice.noSession': '任务已创建。请先打开一个使用 SupraMAS 预设的会话，再点击“在当前会话执行”。',
+  'notice.wrongPreset': '当前会话不是 SupraMAS 预设。请新建或切换到 SupraMAS 会话后再执行材料任务。',
   'error.generic': '操作失败，请稍后重试。',
 } as const
 
@@ -169,6 +170,7 @@ export const en: Record<SupraMasKey, string> = {
   'notice.resumed': 'Task resumed and sent to continue.',
   'notice.cancelled': 'Task cancelled.',
   'notice.noSession': 'Task created. Open a session using the SupraMAS preset, then choose “Run in current session”.',
+  'notice.wrongPreset': 'The current session does not use the SupraMAS preset. Switch to a SupraMAS session before running this task.',
   'error.generic': 'The operation failed. Try again shortly.',
 }
 

@@ -2,15 +2,19 @@
 
 import {
   EDGE_TYPES,
+  EVIDENCE_KINDS,
   SOURCE_TYPES,
   TUNING_DIMENSIONS,
   type EdgeType,
   type EvidenceChunk,
+  type EvidenceChunkInput,
+  type EvidenceKind,
   type EvidenceRef,
   type EvidenceVerification,
   type LimitationRecord,
   type PaperArtifact,
   type PaperArtifactMetadata,
+  type FullTextSourceArtifact,
   type PaperNode,
   type SourceType,
   type StrategyEdge,
@@ -22,7 +26,7 @@ import {
 } from './types.ts'
 
 export type * from './types.ts'
-export { EDGE_TYPES, SOURCE_TYPES, TUNING_DIMENSIONS } from './types.ts'
+export { EDGE_TYPES, EVIDENCE_KINDS, SOURCE_TYPES, TUNING_DIMENSIONS } from './types.ts'
 export type * from './orchestration.ts'
 export {
   createStage1Workflow,
@@ -36,6 +40,7 @@ export {
 type UnknownObject = Record<string, unknown>
 
 const ID = /^[a-zA-Z0-9][a-zA-Z0-9._:-]*$/
+const SHA256 = /^[a-f0-9]{64}$/
 
 /** Caller-correctable Stage 1 structure, reference, or evidence failure. */
 export class SupraMasDomainError extends Error {
@@ -83,10 +88,33 @@ function optionalNullableString(value: UnknownObject, key: string, path: string)
 }
 
 function integer(value: unknown, path: string, minimum?: number): number {
-  if (!Number.isInteger(value) || minimum !== undefined && (value as number) < minimum) {
+  if (!Number.isSafeInteger(value) || minimum !== undefined && (value as number) < minimum) {
     fail(`${path} must be an integer${minimum === undefined ? '' : ` >= ${minimum}`}`)
   }
   return value as number
+}
+
+function parseFullTextSource(
+  value: unknown,
+  jobId: string,
+  paperId: string,
+  path: string,
+): FullTextSourceArtifact {
+  const item = asObject(value, path)
+  exactKeys(item, ['local_path', 'media_type', 'sha256', 'byte_length', 'page_count'], path)
+  const localPath = requiredString(item, 'local_path', path).replaceAll('\\', '/')
+  const expected = `runs/${jobId}/papers/raw/${paperId}.pdf`
+  if (localPath !== expected) fail(`${path}.local_path must be ${expected}`)
+  if (item.media_type !== 'application/pdf') fail(`${path}.media_type must be application/pdf`)
+  const sha256 = requiredString(item, 'sha256', path)
+  if (!SHA256.test(sha256)) fail(`${path}.sha256 must be a lowercase SHA-256 digest`)
+  return {
+    local_path: localPath,
+    media_type: 'application/pdf',
+    sha256,
+    byte_length: integer(item.byte_length, `${path}.byte_length`, 1),
+    page_count: integer(item.page_count, `${path}.page_count`, 1),
+  }
 }
 
 function optionalNullableInteger(value: UnknownObject, key: string, path: string, minimum?: number): number | null | undefined {
@@ -261,17 +289,21 @@ export class EvidenceCatalog {
    */
   storePaper(metadata: PaperArtifactMetadata): PaperArtifact {
     const paper = asObject(metadata, 'paper')
-    exactKeys(paper, ['paper_id', 'paper_title', 'local_path', 'source_type'], 'paper')
+    exactKeys(paper, ['paper_id', 'paper_title', 'local_path', 'source_type', 'full_text_source'], 'paper')
     const paperId = identifier(paper, 'paper_id', 'paper')
     const localPath = requiredString(paper, 'local_path', 'paper').replaceAll('\\', '/')
     const expected = `runs/${this.jobId}/papers/${paperId}.json`
     if (localPath !== expected) fail(`paper.local_path must be ${expected}`)
     if (this.papers.has(paperId)) fail(`paper ${paperId} already exists`, 'SUPRAMAS_DUPLICATE_ID')
+    const fullTextSource = paper.full_text_source === undefined
+      ? undefined
+      : parseFullTextSource(paper.full_text_source, this.jobId, paperId, 'paper.full_text_source')
     const artifact: PaperArtifact = {
       paper_id: paperId,
       paper_title: requiredString(paper, 'paper_title', 'paper'),
       local_path: localPath,
       source_type: oneOf<SourceType>(paper.source_type, SOURCE_TYPES, 'paper.source_type'),
+      ...(fullTextSource === undefined ? {} : { full_text_source: fullTextSource }),
       chunks: [],
     }
     this.papers.set(paperId, artifact)
@@ -284,11 +316,11 @@ export class EvidenceCatalog {
    * @param chunk - Page-aware full local text.
    * @returns a detached stored chunk.
    */
-  addChunk(paperId: string, chunk: EvidenceChunk): EvidenceChunk {
+  addChunk(paperId: string, chunk: EvidenceChunkInput): EvidenceChunk {
     const artifact = this.papers.get(paperId)
     if (artifact === undefined) fail(`paper ${paperId} has no local artifact`, 'SUPRAMAS_EVIDENCE_MISSING')
     const item = asObject(chunk, 'chunk')
-    exactKeys(item, ['chunk_id', 'page', 'text'], 'chunk')
+    exactKeys(item, ['chunk_id', 'page', 'text', 'evidence_kind'], 'chunk')
     const chunkId = identifier(item, 'chunk_id', 'chunk')
     if (this.chunkOwners.has(chunkId)) fail(`chunk ${chunkId} already exists`, 'SUPRAMAS_DUPLICATE_ID')
     const page = optionalNullableInteger(item, 'page', 'chunk', 1)
@@ -296,6 +328,9 @@ export class EvidenceCatalog {
       chunk_id: chunkId,
       ...(page === undefined ? {} : { page }),
       text: requiredString(item, 'text', 'chunk'),
+      evidence_kind: item.evidence_kind === undefined
+        ? 'abstract'
+        : oneOf<EvidenceKind>(item.evidence_kind, EVIDENCE_KINDS, 'chunk.evidence_kind'),
     }
     artifact.chunks.push(stored)
     this.chunkOwners.set(chunkId, paperId)
@@ -310,6 +345,14 @@ export class EvidenceCatalog {
   getPaper(paperId: string): PaperArtifact | undefined {
     const paper = this.papers.get(paperId)
     return paper === undefined ? undefined : clone(paper)
+  }
+
+  /**
+   * List detached paper artifacts in their stable insertion order.
+   * @returns every paper currently available to the run.
+   */
+  listPapers(): PaperArtifact[] {
+    return [...this.papers.values()].map(paper => clone(paper))
   }
 
   /**
@@ -332,7 +375,13 @@ export class EvidenceCatalog {
     if (!chunk.text.includes(evidence.evidence_text.trim())) {
       fail(`evidence quote is not present in chunk ${evidence.chunk_id}`, 'SUPRAMAS_EVIDENCE_MISMATCH')
     }
-    return { verified: true, paper_id: paperId, chunk_id: evidence.chunk_id, local_path: artifact.local_path }
+    return {
+      verified: true,
+      paper_id: paperId,
+      chunk_id: evidence.chunk_id,
+      local_path: artifact.local_path,
+      evidence_kind: chunk.evidence_kind,
+    }
   }
 }
 

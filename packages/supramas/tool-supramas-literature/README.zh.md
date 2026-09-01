@@ -32,7 +32,7 @@ kind: "package-reference"
     maxChunkReadChars: 20000
 ```
 
-Builder 角色获得 `supramas_literature_search`、`supramas_paper_import`、`supramas_chunk_list` 和 `supramas_chunk_read`。Reviewer 角色只获得列表/读取工具及独立的字面证据验证器。
+Builder 角色获得 `supramas_literature_search`、`supramas_paper_import`、`supramas_chunk_list` 和 `supramas_chunk_read`。Reviewer 角色只获得列表/读取工具及独立的字面证据验证器。检索摘要只用于发现；builder 必须成功导入完整 PDF 后才能提交节点。
 
 <a id="model-experience"></a>
 
@@ -58,7 +58,7 @@ Builder 角色获得 `supramas_literature_search`、`supramas_paper_import`、`s
 
 - 检索能力取决于已挂载的结构化索引提供器集合。
 - 分块分页按字符计算，不按 token 计算。
-- 管理用途的旧论文/分块写入工具为兼容性保留，但不在 Builder 或 Reviewer allowlist 中。
+- 导入失败会返回“改选开放获取候选”或“细化检索”的恢复指引，绝不授权回退到摘要证据。
 
 <a id="dev-note"></a>
 

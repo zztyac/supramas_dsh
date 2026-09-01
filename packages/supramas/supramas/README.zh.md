@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-本能力注册由 DSH storage-domain 服务支持的确定性材料科学运行目录 `ctx.supramas`。每次运行都有稳定标识、CAS revision、受约束的阶段图、规范产物路径、角色白名单、隔离证据目录，以及可选的持久 Stage 1 工作流。
+本能力注册由 DSH storage-domain 服务支持的确定性材料科学运行目录 `ctx.supramas`。每次运行都有稳定标识、CAS revision、受约束的阶段图、规范产物路径、角色白名单、按来源分类的隔离证据目录，以及可选的持久 Stage 1 工作流。
 
 ## 目录
 
@@ -23,7 +23,7 @@ kind: "package-reference"
 
 ## 使用方式
 
-在任何 SupraMAS 工具消费者之前挂载 DSH 存储栈和本服务。创建运行并推进到 `task_ready`，再携带精确 revision 调用 `startStage1()`。读取 `getStage1().nextAction`，通过 CAS 方法提交 builder/reviewer 结果，并仅在状态机返回 `finalize` 后调用 `finalizeStage1()`。重启后使用恢复出的 revision 迁回 `running`，精确的待执行动作不会丢失。
+在任何 SupraMAS 工具消费者之前挂载 DSH 存储栈和本服务。通过导入服务获取完整 PDF，使论文元数据带有 `full_text_source`，解析块带有 `evidence_kind: full_text`；手工文本块默认按 `abstract` 处理。创建运行并推进到 `task_ready` 后，必须使用每次返回的精确 revision 驱动 `startStage1()` 到 `finalizeStage1()`；恢复的工作流会在暴露待执行动作前重新校验。
 
 <a id="understand-the-implementation"></a>
 
@@ -55,9 +55,9 @@ kind: "package-reference"
 
 ## 已知限制与后续工作
 
-- 持久记录包含论文元数据和抽取文本块，但本包不抓取或解析 PDF。
-- `local_path` 作为规范溯源路径校验；独立文件导入 provider 负责物化源文件。
-- 科学审查仍由独立、只读子智能体决策；运行时只强制 accept/revise/reject 门。
+- 持久记录包含论文元数据、可用时的完整源文件描述，以及按来源分类的文本块，但本包不抓取或解析 PDF。
+- 文件导入 provider 必须物化 `full_text_source.local_path` 指向的规范原始 PDF。
+- 科学审查仍由独立、只读子智能体决策；运行时强制决策门和期望满足度/边类型映射。
 
 <a id="dev-note"></a>
 

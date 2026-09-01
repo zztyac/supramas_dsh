@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -23,6 +23,19 @@ import SupraMasRuntime from '../../supramas/src/index.ts'
 import SupraMasArtifacts from '../../supramas-artifacts/src/index.ts'
 import * as ToolSupraMas from '../src/index.ts'
 
+const contexts: Context[] = []
+const roots: string[] = []
+
+afterEach(async () => {
+  await Promise.all(contexts.splice(0).map(ctx => ctx.fiber.dispose()))
+  await Promise.all(roots.splice(0).map(root => rm(root, {
+    recursive: true,
+    force: true,
+    maxRetries: 10,
+    retryDelay: 100,
+  })))
+})
+
 async function setup(): Promise<Context> {
   const root = await mkdtemp(join(tmpdir(), 'dsh-evidence-tools-'))
   roots.push(root)
@@ -46,22 +59,23 @@ async function setup(): Promise<Context> {
   await ctx.plugin(SupraMasRuntime)
   await ctx.plugin(SupraMasArtifacts, { root })
   await ctx.plugin(ToolSupraMas)
-  await ctx.supramas.create({ jobId: 'demo', inputTaskPath: 'runs/demo/input_task.yaml', runDir: 'runs/demo' })
+  const run = await ctx.supramas.create({
+    jobId: 'demo', inputTaskPath: 'runs/demo/input_task.yaml', runDir: 'runs/demo',
+  })
+  await ctx.supramas.storePaper(run.id, {
+    paper_id: 'paper-1',
+    paper_title: 'BZO pinning in REBCO',
+    local_path: 'runs/demo/papers/paper-1.json',
+    source_type: 'experimental',
+  })
+  await ctx.supramas.addEvidenceChunk(run.id, 'paper-1', {
+    chunk_id: 'paper-1-abstract',
+    page: 1,
+    text: 'The abstract reports improved in-field Jc.',
+    evidence_kind: 'abstract',
+  })
   return ctx
 }
-
-const contexts: Context[] = []
-const roots: string[] = []
-
-afterEach(async () => {
-  await Promise.all(contexts.splice(0).map(ctx => ctx.fiber.dispose()))
-  await Promise.all(roots.splice(0).map(root => rm(root, {
-    recursive: true,
-    force: true,
-    maxRetries: 10,
-    retryDelay: 100,
-  })))
-})
 
 let callId = 0
 function call(ctx: Context, name: string, args: unknown) {
@@ -74,100 +88,38 @@ function call(ctx: Context, name: string, args: unknown) {
 }
 
 describe('SupraMAS evidence tools', () => {
-  it('stores a canonical run-local paper and one provenance-bound chunk', async () => {
+  it('does not expose legacy model-facing paper or chunk mutation tools', async () => {
     const ctx = await setup()
-    const paper = await call(ctx, 'supramas_paper_store', {
-      run_id: 'supramas:demo',
-      paper_id: 'paper-1',
-      paper_title: 'BZO pinning in REBCO',
-      local_path: 'runs/demo/papers/paper-1.json',
-      source_type: 'experimental',
-    })
-    expect(paper.isError).toBe(false)
-    if (paper.isError) throw new Error('expected paper store success')
-    expect(paper.value).toMatchObject({
-      status: 'success',
-      artifacts: ['runs/demo/papers/paper-1.json'],
-      data: { paper: { paper_id: 'paper-1', chunk_count: 0 } },
-    })
-
-    const chunk = await call(ctx, 'supramas_chunk_extract', {
-      run_id: 'supramas:demo',
-      paper_id: 'paper-1',
-      chunk_id: 'paper-1-p2-performance',
-      page: 2,
-      text: 'The BZO film retained high in-field Jc at 77 K and 5 T.',
-    })
-    expect(chunk.isError).toBe(false)
-    if (chunk.isError) throw new Error('expected chunk extraction success')
-    expect(chunk.value).toMatchObject({
-      status: 'success',
-      data: { chunk: { chunk_id: 'paper-1-p2-performance', page: 2 } },
-    })
+    const names = ctx.tools.schemas().map(schema => schema.name)
+    expect(names).not.toContain('supramas_paper_store')
+    expect(names).not.toContain('supramas_chunk_extract')
+    expect(names).not.toContain('supramas_artifact_read')
   })
 
-  it('lets a reviewer read the local artifact and verify an exact evidence quote', async () => {
+  it('returns the durable evidence kind when a reviewer verifies a literal quote', async () => {
     const ctx = await setup()
-    await call(ctx, 'supramas_paper_store', {
-      run_id: 'supramas:demo',
-      paper_id: 'paper-1',
-      paper_title: 'BZO pinning in REBCO',
-      local_path: 'runs/demo/papers/paper-1.json',
-      source_type: 'experimental',
-    })
-    await call(ctx, 'supramas_chunk_extract', {
-      run_id: 'supramas:demo',
-      paper_id: 'paper-1',
-      chunk_id: 'paper-1-p2-performance',
-      page: 2,
-      text: 'The BZO film retained high in-field Jc at 77 K and 5 T.',
-    })
-
-    const artifact = await call(ctx, 'supramas_artifact_read', { run_id: 'supramas:demo', paper_id: 'paper-1' })
-    expect(artifact.isError).toBe(false)
-    if (artifact.isError) throw new Error('expected artifact read success')
-    expect(artifact.value).toMatchObject({
-      status: 'success',
-      data: { paper: { paper_id: 'paper-1', chunk_count: 1 } },
-    })
-
     const verified = await call(ctx, 'supramas_evidence_verify', {
       run_id: 'supramas:demo',
       paper_id: 'paper-1',
-      chunk_id: 'paper-1-p2-performance',
-      page: 2,
-      evidence_text: 'retained high in-field Jc at 77 K and 5 T',
+      chunk_id: 'paper-1-abstract',
+      page: 1,
+      evidence_text: 'improved in-field Jc',
     })
     expect(verified.isError).toBe(false)
     if (verified.isError) throw new Error('expected evidence verification success')
     expect(verified.value).toMatchObject({
       status: 'success',
-      data: { verification: { verified: true, chunk_id: 'paper-1-p2-performance' } },
+      data: { verification: { verified: true, evidence_kind: 'abstract' } },
     })
   })
 
   it('returns an actionable domain error when a quote is not in the local chunk', async () => {
     const ctx = await setup()
-    await call(ctx, 'supramas_paper_store', {
-      run_id: 'supramas:demo',
-      paper_id: 'paper-1',
-      paper_title: 'BZO pinning in REBCO',
-      local_path: 'runs/demo/papers/paper-1.json',
-      source_type: 'experimental',
-    })
-    await call(ctx, 'supramas_chunk_extract', {
-      run_id: 'supramas:demo',
-      paper_id: 'paper-1',
-      chunk_id: 'paper-1-p2-performance',
-      page: 2,
-      text: 'The BZO film retained high in-field Jc at 77 K and 5 T.',
-    })
-
     const mismatch = await call(ctx, 'supramas_evidence_verify', {
       run_id: 'supramas:demo',
       paper_id: 'paper-1',
-      chunk_id: 'paper-1-p2-performance',
-      page: 2,
+      chunk_id: 'paper-1-abstract',
+      page: 1,
       evidence_text: 'invented measurement',
     })
     expect(mismatch.isError).toBe(false)
@@ -177,95 +129,5 @@ describe('SupraMAS evidence tools', () => {
       next_actions: ['read_local_artifact', 'correct_evidence_quote'],
       error: { code: 'SUPRAMAS_EVIDENCE_MISMATCH' },
     })
-  })
-
-  it('routes missing and duplicate provenance to distinct recovery actions', async () => {
-    const ctx = await setup()
-    const missing = await call(ctx, 'supramas_artifact_read', {
-      run_id: 'supramas:demo',
-      paper_id: 'missing',
-    })
-    expect(missing.isError).toBe(false)
-    if (missing.isError) throw new Error('expected missing-evidence envelope')
-    expect(missing.value).toMatchObject({
-      status: 'error',
-      next_actions: ['store_local_paper_or_chunk', 'retry_evidence_lookup'],
-      error: { code: 'SUPRAMAS_EVIDENCE_MISSING' },
-    })
-
-    const args = {
-      run_id: 'supramas:demo',
-      paper_id: 'paper-1',
-      paper_title: 'BZO pinning in REBCO',
-      local_path: 'runs/demo/papers/paper-1.json',
-      source_type: 'experimental',
-    }
-    await call(ctx, 'supramas_paper_store', args)
-    const duplicate = await call(ctx, 'supramas_paper_store', args)
-    expect(duplicate.isError).toBe(false)
-    if (duplicate.isError) throw new Error('expected duplicate-id envelope')
-    expect(duplicate.value).toMatchObject({
-      status: 'error',
-      next_actions: ['choose_unique_artifact_id', 'inspect_existing_artifact'],
-      error: { code: 'SUPRAMAS_DUPLICATE_ID' },
-    })
-  })
-
-  it('supports evidence without a claimed page and omits nullish pages from model output', async () => {
-    const ctx = await setup()
-    await call(ctx, 'supramas_paper_store', {
-      run_id: 'supramas:demo',
-      paper_id: 'paper-1',
-      paper_title: 'BZO pinning in REBCO',
-      local_path: 'runs/demo/papers/paper-1.json',
-      source_type: 'experimental',
-    })
-    const chunk = await call(ctx, 'supramas_chunk_extract', {
-      run_id: 'supramas:demo',
-      paper_id: 'paper-1',
-      chunk_id: 'paper-1-unpaged',
-      text: 'The local chunk has no reliable page marker.',
-    })
-    expect(chunk.isError).toBe(false)
-    if (chunk.isError) throw new Error('expected unpaged chunk success')
-    expect(chunk.value).toMatchObject({ data: { chunk: { chunk_id: 'paper-1-unpaged' } } })
-    expect((chunk.value as { data: { chunk: object } }).data.chunk).not.toHaveProperty('page')
-
-    const artifact = await call(ctx, 'supramas_artifact_read', {
-      run_id: 'supramas:demo', paper_id: 'paper-1',
-    })
-    expect(artifact.isError).toBe(false)
-    if (artifact.isError) throw new Error('expected artifact success')
-    expect(JSON.stringify(artifact.value)).not.toContain('The local chunk has no reliable page marker.')
-
-    const verified = await call(ctx, 'supramas_evidence_verify', {
-      run_id: 'supramas:demo',
-      paper_id: 'paper-1',
-      chunk_id: 'paper-1-unpaged',
-      evidence_text: 'no reliable page marker',
-    })
-    expect(verified.isError).toBe(false)
-    if (verified.isError) throw new Error('expected unpaged verification success')
-    expect(verified.value).toMatchObject({ status: 'success' })
-  })
-
-  it('does not hide an impossible post-store artifact disappearance', async () => {
-    const ctx = await setup()
-    await call(ctx, 'supramas_paper_store', {
-      run_id: 'supramas:demo',
-      paper_id: 'paper-1',
-      paper_title: 'BZO pinning in REBCO',
-      local_path: 'runs/demo/papers/paper-1.json',
-      source_type: 'experimental',
-    })
-    vi.spyOn(ctx.supramas, 'readPaper').mockReturnValue(undefined)
-
-    const result = await call(ctx, 'supramas_chunk_extract', {
-      run_id: 'supramas:demo',
-      paper_id: 'paper-1',
-      chunk_id: 'paper-1-inconsistent',
-      text: 'Stored before the simulated internal inconsistency.',
-    })
-    expect(result.isError).toBe(true)
   })
 })

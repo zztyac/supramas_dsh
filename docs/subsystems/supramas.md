@@ -16,7 +16,9 @@ Each paper artifact belongs to one run and carries a stable local provenance pat
 
 ## Stage 1 control flow
 
-The durable next action selects one legal step: build a root, build a child for an open limitation, review a candidate, revise from reviewer findings, finalize, or report a terminal outcome. Builders propose evidence-grounded candidates; reviewers accept, revise, or reject them; the coordinator persists every handoff before continuing.
+The durable next action selects one legal step: build a root, build a child for an open limitation, review a candidate, revise from reviewer findings, finalize, or report a terminal outcome. In the shipped preset, the coordinator supplies only the run id and exact revision. Each submit tool atomically starts one isolated, schema-constrained builder or reviewer, persists its structured result with the child run id, and then advances the workflow. The coordinator cannot construct or repair either payload. Accepted reviews must be clean, and restoration plus finalization revalidate the recorded handoff identities.
+
+Builder delegation reuses imported full-text papers before enabling new discovery. Each child has a configurable wall-clock bound, defaulting to ten minutes. A failed child leaves revision and attempt counters unchanged and latches that run/revision/role for the process, so a coordinator retry receives a stop envelope instead of spawning another child. Restarting the process clears only this transient latch and permits one resume attempt against the same durable revision.
 
 ## Compatibility files
 
@@ -51,13 +53,13 @@ create(request: CreateRunRequest): Promise<RunSnapshot>
 /**
  * Register one canonical paper artifact under a run.
  * @param id - Stable owning run identity.
- * @param metadata - Canonical run-local paper metadata.
+ * @param metadata - Canonical run-local paper metadata, including durable full-text provenance when acquired.
  * @returns a detached empty artifact.
  */
 storePaper(id: SupraMasRunIdBrand, metadata: PaperArtifactMetadata): Promise<PaperArtifact>
 
 /**
- * Validate and persist one paper plus all of its page-aware chunks as one storage mutation.
+ * Validate and persist one paper plus all of its provenance-classified page-aware chunks as one storage mutation.
  * Any invalid metadata or chunk fails before the durable record and process catalog change.
  * @param id - Stable owning run identity.
  * @param request - Complete paper metadata and extracted chunk set.
@@ -66,13 +68,13 @@ storePaper(id: SupraMasRunIdBrand, metadata: PaperArtifactMetadata): Promise<Pap
 importPaper(id: SupraMasRunIdBrand, request: PaperImportRequest): Promise<PaperArtifact>
 
 /**
- * Add one provenance-bound chunk to a stored paper.
+ * Add one provenance-bound chunk to a stored paper; omitted evidence kind is stored fail-closed as abstract.
  * @param id - Stable owning run identity.
  * @param paperId - Owning paper identity.
- * @param chunk - Local page-aware evidence text.
+ * @param chunk - Local page-aware evidence text and optional provenance class.
  * @returns a detached stored chunk.
  */
-addEvidenceChunk(id: SupraMasRunIdBrand, paperId: string, chunk: EvidenceChunk): Promise<EvidenceChunk>
+addEvidenceChunk(id: SupraMasRunIdBrand, paperId: string, chunk: EvidenceChunkInput): Promise<EvidenceChunk>
 
 /**
  * Read one detached local paper artifact.
@@ -83,11 +85,18 @@ addEvidenceChunk(id: SupraMasRunIdBrand, paperId: string, chunk: EvidenceChunk):
 readPaper(id: SupraMasRunIdBrand, paperId: string): PaperArtifact | undefined
 
 /**
+ * List detached local paper artifacts available to one run.
+ * @param id - Stable owning run identity.
+ * @returns papers in their stable import order.
+ */
+listPapers(id: SupraMasRunIdBrand): PaperArtifact[]
+
+/**
  * Verify one evidence quote against run-local paper chunks.
  * @param id - Stable owning run identity.
  * @param paperId - Expected owning paper.
  * @param evidence - Chunk, page, and exact evidence quote.
- * @returns stable verified provenance.
+ * @returns stable verified provenance including the persisted evidence kind.
  */
 verifyEvidence(id: SupraMasRunIdBrand, paperId: string, evidence: EvidenceRef): EvidenceVerification
 
@@ -128,7 +137,7 @@ getStage1(id: SupraMasRunIdBrand): Stage1RunState | undefined
 submitStage1Builder(ref: RunRef, submission: Stage1BuilderSubmission): Promise<Stage1RunState>
 
 /**
- * Persist one reviewer decision; only acceptance can add the candidate to the tree.
+ * Persist one reviewer decision; accepted child edges must match the declared expectation satisfaction.
  * @param ref - Expected current run revision.
  * @param submission - Reviewer decision and actionable findings.
  * @returns the committed workflow and its next action.

@@ -122,6 +122,7 @@ export interface StablePaperChunk {
   readonly chunk_id: string
   readonly page: number
   readonly text: string
+  readonly evidence_kind: 'full_text'
 }
 
 /** Stable service-level literature failure codes. */

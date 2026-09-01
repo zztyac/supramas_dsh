@@ -34,6 +34,16 @@ export const supraMasEvidenceChunk = z.object({
   chunk_id: z.string(),
   page: z.number().int().positive().nullable().optional(),
   text: z.string(),
+  evidence_kind: z.enum(['abstract', 'full_text']),
+})
+
+/** Durable acquisition and parsing proof for one complete PDF source. */
+export const supraMasFullTextSource = z.object({
+  local_path: z.string(),
+  media_type: z.literal('application/pdf'),
+  sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  byte_length: z.number().int().positive(),
+  page_count: z.number().int().positive(),
 })
 
 /** One complete local paper artifact, including every extracted chunk. */
@@ -42,6 +52,7 @@ export const supraMasPaperArtifact = z.object({
   paper_title: z.string(),
   local_path: z.string(),
   source_type: z.enum(SOURCE_TYPES),
+  full_text_source: supraMasFullTextSource.optional(),
   chunks: z.array(supraMasEvidenceChunk),
 })
 
@@ -68,7 +79,7 @@ export type SupraMasRunRecord = z.infer<typeof supraMasRunRecord>
  */
 export const supraMasDomainSpec = defineDomain({
   name: 'supramas',
-  version: 1,
+  version: 2,
   tables: {
     runs: domainTable<SupraMasRunId, SupraMasRunRecord>(supraMasRunRecord),
   },

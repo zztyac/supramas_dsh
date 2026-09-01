@@ -12,19 +12,21 @@ SupraMAS 是叠加在 DSH 上的材料科学扩展接缝。它负责持久研究
 
 ## 证据所有权
 
-每篇论文产物只属于一个运行，包含稳定的本地溯源路径和抽取文本块。策略记录、限制记录和边只能引用可解析到已保存文本块的逐字证据。候选论文只有经过 reviewer 接受才能进入策略树。
+每篇论文产物只属于一个运行，并记录每个文本块来自摘要还是已解析全文。完整导入会持久化规范原始 PDF 路径、摘要、大小、页数和 `full_text` 文本块。当任务排除摘要证据时，接收、重启恢复和最终完成都会要求每个已接受节点具有持久 PDF 溯源，并至少引用一个全文文本块。
 
 ## Stage 1 控制流
 
-持久下一动作只会选择一个合法步骤：构建根节点、针对开放限制构建子节点、审查候选、依据审查意见修订、完成导出，或报告终态结果。builder 提出有证据支撑的候选，reviewer 接受、修订或拒绝；coordinator 在继续前持久化每次交接。
+持久下一动作只会选择一个合法步骤：构建根节点、针对开放限制构建子节点、审查候选、依据审查意见修订、完成导出，或报告终态结果。在内置 preset 中，coordinator 只提供运行 ID 与精确 revision。每个提交工具原子启动一个隔离且受 schema 约束的 builder 或 reviewer，持久化其结构化结果与子任务运行 ID，再推进工作流。Coordinator 不能构造或修复任一载荷。已接受审查必须不含未解决事项，恢复与最终完成还会复验已记录的交接身份。
+
+Builder 委派会优先复用已经导入的全文论文，再决定是否开放新检索。每个子任务都有可配置的墙钟上限，默认为十分钟。子任务失败时 revision 与尝试计数保持不变，并在当前进程按运行、revision 和角色锁定；coordinator 再次调用只会收到停止信封，不会继续创建子任务。重启进程只会清除这个瞬时锁，允许针对同一持久 revision 恢复一次。
 
 ## 兼容文件
 
-`ctx.supramasArtifacts` 把持久工作流投影为 `runs/<jobId>/input_task.yaml`、论文 JSON 文件、`tree_state.json` 和三项最终成果。它把每条路径限制在一个配置好的工作区根目录内，并原子替换完整文件。持久状态始终是权威来源：调用方通过重复同步修复部分或中断的导出，不回退已完成运行。
+`ctx.supramasArtifacts` 把持久工作流投影为 `runs/<jobId>/input_task.yaml`、原始 PDF、论文 JSON 文件、`tree_state.json` 和三项最终成果。它把每条路径限制在一个配置好的工作区根目录内，校验已声明 PDF 是否存在，并原子替换完整文件。
 
 ## 浏览器边界
 
-V1 Remote 视图公开任务标识、生命周期状态、限制、汇总进度、下一动作、reviewer 已接受的策略树投影、不含正文的论文块目录、有界证据切片，以及三项标准最终成果的有界内容，并有意隐藏 Host 文件系统路径、待审候选项与内部工作流载荷。非技术工作区通过这个边界创建和控制任务，轮询活动任务详情直至进入终态，再向活动 SupraMAS 会话加入一条有界协调消息。
+V1 Remote 视图公开任务标识、生命周期状态、限制、汇总进度、下一动作、reviewer 已接受的策略树投影、不含正文的论文块目录、有界证据切片，以及三项标准最终成果的有界内容，并有意隐藏 Host 文件系统路径、待审候选项与内部工作流载荷。非技术工作区只在当前会话使用 `supramas` preset 时加入任务，防止通过 standard agent 表面执行。
 
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
@@ -51,13 +53,13 @@ create(request: CreateRunRequest): Promise<RunSnapshot>
 /**
  * Register one canonical paper artifact under a run.
  * @param id - Stable owning run identity.
- * @param metadata - Canonical run-local paper metadata.
+ * @param metadata - Canonical run-local paper metadata, including durable full-text provenance when acquired.
  * @returns a detached empty artifact.
  */
 storePaper(id: SupraMasRunIdBrand, metadata: PaperArtifactMetadata): Promise<PaperArtifact>
 
 /**
- * Validate and persist one paper plus all of its page-aware chunks as one storage mutation.
+ * Validate and persist one paper plus all of its provenance-classified page-aware chunks as one storage mutation.
  * Any invalid metadata or chunk fails before the durable record and process catalog change.
  * @param id - Stable owning run identity.
  * @param request - Complete paper metadata and extracted chunk set.
@@ -66,13 +68,13 @@ storePaper(id: SupraMasRunIdBrand, metadata: PaperArtifactMetadata): Promise<Pap
 importPaper(id: SupraMasRunIdBrand, request: PaperImportRequest): Promise<PaperArtifact>
 
 /**
- * Add one provenance-bound chunk to a stored paper.
+ * Add one provenance-bound chunk to a stored paper; omitted evidence kind is stored fail-closed as abstract.
  * @param id - Stable owning run identity.
  * @param paperId - Owning paper identity.
- * @param chunk - Local page-aware evidence text.
+ * @param chunk - Local page-aware evidence text and optional provenance class.
  * @returns a detached stored chunk.
  */
-addEvidenceChunk(id: SupraMasRunIdBrand, paperId: string, chunk: EvidenceChunk): Promise<EvidenceChunk>
+addEvidenceChunk(id: SupraMasRunIdBrand, paperId: string, chunk: EvidenceChunkInput): Promise<EvidenceChunk>
 
 /**
  * Read one detached local paper artifact.
@@ -83,11 +85,18 @@ addEvidenceChunk(id: SupraMasRunIdBrand, paperId: string, chunk: EvidenceChunk):
 readPaper(id: SupraMasRunIdBrand, paperId: string): PaperArtifact | undefined
 
 /**
+ * List detached local paper artifacts available to one run.
+ * @param id - Stable owning run identity.
+ * @returns papers in their stable import order.
+ */
+listPapers(id: SupraMasRunIdBrand): PaperArtifact[]
+
+/**
  * Verify one evidence quote against run-local paper chunks.
  * @param id - Stable owning run identity.
  * @param paperId - Expected owning paper.
  * @param evidence - Chunk, page, and exact evidence quote.
- * @returns stable verified provenance.
+ * @returns stable verified provenance including the persisted evidence kind.
  */
 verifyEvidence(id: SupraMasRunIdBrand, paperId: string, evidence: EvidenceRef): EvidenceVerification
 
@@ -128,7 +137,7 @@ getStage1(id: SupraMasRunIdBrand): Stage1RunState | undefined
 submitStage1Builder(ref: RunRef, submission: Stage1BuilderSubmission): Promise<Stage1RunState>
 
 /**
- * Persist one reviewer decision; only acceptance can add the candidate to the tree.
+ * Persist one reviewer decision; accepted child edges must match the declared expectation satisfaction.
  * @param ref - Expected current run revision.
  * @param submission - Reviewer decision and actionable findings.
  * @returns the committed workflow and its next action.

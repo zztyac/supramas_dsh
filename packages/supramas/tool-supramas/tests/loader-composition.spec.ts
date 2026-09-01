@@ -104,9 +104,6 @@ describe('SupraMAS real Loader composition', () => {
       'supramas_stage1_reviewer_submit',
       'supramas_stage1_finalize',
       'supramas_artifacts_sync',
-      'supramas_paper_store',
-      'supramas_chunk_extract',
-      'supramas_artifact_read',
       'supramas_evidence_verify',
     ])
   }, 30_000)

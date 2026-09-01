@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-This service coordinates one safe paper import: resolve and acquire an opaque candidate, atomically cache its verified PDF, parse bounded page text, create deterministic chunks, commit metadata plus all chunks in one durable mutation, then materialize the compatibility JSON.
+This service coordinates one safe paper import: resolve and acquire an opaque candidate, atomically cache its verified PDF, parse bounded page text, create deterministic `full_text` chunks, commit metadata, complete source provenance, and all chunks in one durable mutation, then materialize the compatibility JSON.
 
 ## Table of Contents
 
@@ -29,7 +29,7 @@ Mount it after the SupraMAS runtime, artifacts service, literature service, and 
     overlapChars: 400
 ```
 
-`importCandidate()` accepts a run ID, service-issued candidate ID, and source classification. It returns only safe relative paths, a digest, byte/page/chunk counts, and paper metadata.
+`importCandidate()` accepts a run ID, service-issued candidate ID, and source classification. It persists `full_text_source` with the canonical raw PDF path, SHA-256 digest, byte length, media type, and page count; every parsed chunk is marked `evidence_kind: full_text`.
 
 ## Model Experience
 

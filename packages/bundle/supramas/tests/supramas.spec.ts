@@ -6,7 +6,7 @@ import * as yaml from 'js-yaml'
 import { entryListSchema } from '@deepseek-ai/cordis-plugin-include'
 
 describe('dsh-supramas bundle', () => {
-  it('declares a parseable Profile patch in runtime, API, tool, and UI order', () => {
+  it('declares a parseable host Profile patch without leaking model tools to standard sessions', () => {
     const root = fileURLToPath(new URL('..', import.meta.url))
     const manifest = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')) as {
       dependencies?: Record<string, string>
@@ -31,8 +31,6 @@ describe('dsh-supramas bundle', () => {
       { id: 'supramas-pdf-pypdf', name: '@deepseek-ai/dsh-supramas-pdf-pypdf' },
       { id: 'supramas-paper-ingest', name: '@deepseek-ai/dsh-supramas-paper-ingest' },
       { id: 'api-supramas', name: '@deepseek-ai/dsh-api-supramas' },
-      { id: 'tool-supramas', name: '@deepseek-ai/dsh-tool-supramas' },
-      { id: 'tool-supramas-literature', name: '@deepseek-ai/dsh-tool-supramas-literature' },
       { id: 'client-ui-supramas', name: '@deepseek-ai/dsh-client-ui-supramas' },
     ])
     expect(manifest.dependencies).toMatchObject({
@@ -51,27 +49,20 @@ describe('dsh-supramas bundle', () => {
     })
   })
 
-  it('ships a selectable SupraMAS preset with isolated builder and reviewer delegation', () => {
+  it('ships a selectable SupraMAS preset with atomic builder and reviewer delegation', () => {
     const root = resolve(fileURLToPath(new URL('../../..', import.meta.url)), 'preset', 'agent-presets', 'presets', 'supramas')
     expect(existsSync(resolve(root, 'preset.yml'))).toBe(true)
     const entries = yaml.load(readFileSync(resolve(root, 'agent.cordis.yml'), 'utf8'), {
       schema: entryListSchema,
     }) as { id?: string; name?: string; config?: Record<string, unknown> }[]
-    expect(entries.find(entry => entry.id === 'persona')).toMatchObject({ name: '@deepseek-ai/dsh-persona' })
+    const persona = entries.find(entry => entry.id === 'persona')
+    expect(persona).toMatchObject({ name: '@deepseek-ai/dsh-persona' })
+    expect((persona?.config as { text?: string }).text).toContain('atomically delegates to its isolated subagent')
     expect(entries.find(entry => entry.id === 'tool-supramas')).toMatchObject({ name: '@deepseek-ai/dsh-tool-supramas' })
     expect(entries.find(entry => entry.id === 'tool-supramas-literature')).toMatchObject({ name: '@deepseek-ai/dsh-tool-supramas-literature' })
     expect(entries.find(entry => entry.id === 'tool-web')).toMatchObject({ name: '@deepseek-ai/dsh-tool-web' })
-    const builder = entries.find(entry => entry.id === 'tool-subagent-builder')
-    expect(builder).toMatchObject({ name: '@deepseek-ai/dsh-tool-subagent' })
-    expect(builder?.config).toMatchObject({ toolName: 'supramas_builder', enableRunInBackground: false })
-    const reviewer = entries.find(entry => entry.id === 'tool-subagent-reviewer')
-    expect(reviewer).toMatchObject({ name: '@deepseek-ai/dsh-tool-subagent' })
-    expect(reviewer?.config).toMatchObject({ toolName: 'supramas_reviewer', enableRunInBackground: false })
     expect(entries.find(entry => entry.id === 'tool-subagent')).toBeUndefined()
-    expect((builder?.config as { toolFilter?: { allow?: string[] } }).toolFilter?.allow).toContain('supramas_paper_import')
-    expect((builder?.config as { toolFilter?: { allow?: string[] } }).toolFilter?.allow).not.toContain('supramas_paper_store')
-    expect((reviewer?.config as { toolFilter?: { allow?: string[] } }).toolFilter?.allow).toEqual([
-      'supramas_chunk_list', 'supramas_chunk_read', 'supramas_evidence_verify',
-    ])
+    expect(entries.find(entry => entry.id === 'tool-subagent-builder')).toBeUndefined()
+    expect(entries.find(entry => entry.id === 'tool-subagent-reviewer')).toBeUndefined()
   })
 })

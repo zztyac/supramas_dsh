@@ -24,6 +24,21 @@ export const EDGE_TYPES = ['direct', 'transferable', 'exploratory'] as const
 /** Strength of one parent limitation to child paper relationship. */
 export type EdgeType = typeof EDGE_TYPES[number]
 
+/** Closed provenance classifications for one persisted evidence chunk. */
+export const EVIDENCE_KINDS = ['abstract', 'full_text'] as const
+
+/** Whether one chunk was reconstructed from metadata or parsed from a complete source document. */
+export type EvidenceKind = typeof EVIDENCE_KINDS[number]
+
+/** Durable proof that a complete local PDF was acquired and parsed for one paper. */
+export interface FullTextSourceArtifact {
+  local_path: string
+  media_type: 'application/pdf'
+  sha256: string
+  byte_length: number
+  page_count: number
+}
+
 /** One local evidence quote referenced by a strategy or limitation record. */
 export interface EvidenceRef {
   chunk_id: string
@@ -36,6 +51,12 @@ export interface EvidenceChunk {
   chunk_id: string
   page?: number | null
   text: string
+  evidence_kind: EvidenceKind
+}
+
+/** Input accepted at manual evidence boundaries; omitted provenance is fail-closed as abstract. */
+export type EvidenceChunkInput = Omit<EvidenceChunk, 'evidence_kind'> & {
+  evidence_kind?: EvidenceKind
 }
 
 /** Metadata required before chunks can be attached to one local paper. */
@@ -44,6 +65,7 @@ export interface PaperArtifactMetadata {
   paper_title: string
   local_path: string
   source_type: SourceType
+  full_text_source?: FullTextSourceArtifact
 }
 
 /** Detached view of one run-local paper artifact and all its chunks. */
@@ -122,6 +144,8 @@ export type SupraMasDomainErrorCode =
   | 'SUPRAMAS_BROKEN_REFERENCE'
   | 'SUPRAMAS_EVIDENCE_MISSING'
   | 'SUPRAMAS_EVIDENCE_MISMATCH'
+  | 'SUPRAMAS_EVIDENCE_POLICY_VIOLATION'
+  | 'SUPRAMAS_EDGE_TYPE_MISMATCH'
 
 /** Successful resolution of one evidence quote against local paper storage. */
 export interface EvidenceVerification {
@@ -129,4 +153,5 @@ export interface EvidenceVerification {
   paper_id: string
   chunk_id: string
   local_path: string
+  evidence_kind: EvidenceKind
 }

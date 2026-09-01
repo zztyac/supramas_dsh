@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-本服务协调一次安全论文导入：解析并获取不透明候选，原子缓存已校验 PDF，解析有界分页文本，生成确定性分块，一次持久变更提交元数据与全部分块，最后生成兼容 JSON。
+本服务协调一次安全论文导入：解析并获取不透明候选，原子缓存已校验 PDF，解析有界分页文本，生成确定性的 `full_text` 分块，一次持久变更提交元数据、完整源文件溯源和全部分块，最后生成兼容 JSON。
 
 ## 目录
 
@@ -31,7 +31,7 @@ kind: "package-reference"
     overlapChars: 400
 ```
 
-`importCandidate()` 接受运行 ID、服务签发的候选 ID 和来源分类。返回值只包含安全相对路径、摘要、字节/页/分块数量和论文元数据。
+`importCandidate()` 接受运行 ID、服务签发的候选 ID 和来源分类。它持久化 `full_text_source`，其中包括规范原始 PDF 路径、SHA-256、字节数、媒体类型和页数；每个解析块都标记为 `evidence_kind: full_text`。
 
 <a id="model-experience"></a>
 

@@ -220,7 +220,12 @@ export function chunkParsedPages(
       }
       const content = text.slice(start, end).trim()
       if (content.length > 0) {
-        chunks.push({ chunk_id: `${paperId}-p${page.pageNumber}-c${index}`, page: page.pageNumber, text: content })
+        chunks.push({
+          chunk_id: `${paperId}-p${page.pageNumber}-c${index}`,
+          page: page.pageNumber,
+          text: content,
+          evidence_kind: 'full_text',
+        })
         index++
       }
       if (end >= text.length) break

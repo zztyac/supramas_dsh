@@ -35,9 +35,14 @@ export interface Stage1ReviewFinding {
 /** Closed scientific review decisions. */
 export type Stage1ReviewDecision = 'accept' | 'revise' | 'reject'
 
+/** Reviewer assessment of how completely one child satisfies its parent expectation. */
+export type ExpectationSatisfaction = 'not_applicable' | 'full' | 'partial' | 'adjacent' | 'none'
+
 /** Reviewer result persisted verbatim enough to guide the next builder turn. */
 export interface Stage1ReviewSubmission {
+  reviewer_run_id?: string
   decision: Stage1ReviewDecision
+  expectation_satisfaction: ExpectationSatisfaction
   summary: string
   critical_issues: Stage1ReviewFinding[]
   edge_issues: Stage1ReviewFinding[]
@@ -46,6 +51,7 @@ export interface Stage1ReviewSubmission {
 
 /** One builder result for a fresh attempt or reviewer-guided revision. */
 export interface Stage1BuilderSubmission {
+  builder_run_id?: string
   paper_node: PaperNodeDraft | null
   edge: ProposedStrategyEdge | null
   reason?: string
@@ -66,6 +72,7 @@ export interface Stage1WorkflowConfig {
   maxChildAttemptsPerLimitation: number
   maxBranchPerNode?: number | null
   targetChildNodes?: number | null
+  requireAgentHandoffs?: boolean
 }
 
 /** Terminal and active states for one limitation frontier. */
@@ -104,6 +111,7 @@ export interface Stage1BuilderAttempt {
   revision_round: number
   status: Stage1BuilderAttemptStatus
   paper_id?: string
+  builder_run_id?: string
   reason?: string
 }
 
@@ -183,6 +191,15 @@ export interface FinalizedStage1Workflow {
 }
 
 const JOB_ID = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/
+const ABSTRACT_ONLY_EXCLUSION = 'abstract-only evidence'
+const EXPECTATION_SATISFACTIONS: readonly ExpectationSatisfaction[] = [
+  'not_applicable', 'full', 'partial', 'adjacent', 'none',
+]
+const EXPECTED_EDGE_TYPE: Readonly<Partial<Record<ExpectationSatisfaction, EdgeType>>> = {
+  full: 'direct',
+  partial: 'transferable',
+  adjacent: 'exploratory',
+}
 
 function fail(message: string): never {
   throw new SupraMasDomainError(message, 'SUPRAMAS_DOMAIN_INVALID')
@@ -265,14 +282,128 @@ function validateFinding(finding: Stage1ReviewFinding, path: string): Stage1Revi
 function validateReview(review: Stage1ReviewSubmission): Stage1ReviewSubmission {
   const decisions: Stage1ReviewDecision[] = ['accept', 'revise', 'reject']
   if (!decisions.includes(review.decision)) fail('review.decision is invalid')
-  return {
+  if (!EXPECTATION_SATISFACTIONS.includes(review.expectation_satisfaction)) {
+    fail('review.expectation_satisfaction is invalid')
+  }
+  const validated = {
+    ...(review.reviewer_run_id === undefined
+      ? {}
+      : { reviewer_run_id: nonempty(review.reviewer_run_id, 'review.reviewer_run_id') }),
     decision: review.decision,
+    expectation_satisfaction: review.expectation_satisfaction,
     summary: nonempty(review.summary, 'review.summary'),
     critical_issues: review.critical_issues.map((finding, index) =>
       validateFinding(finding, `review.critical_issues[${index}]`)),
     edge_issues: review.edge_issues.map((finding, index) =>
       validateFinding(finding, `review.edge_issues[${index}]`)),
     acceptance_conditions: stringList(review.acceptance_conditions, 'review.acceptance_conditions'),
+  }
+  if (
+    validated.decision === 'accept'
+    && (
+      validated.critical_issues.length > 0
+      || validated.edge_issues.length > 0
+      || validated.acceptance_conditions.length > 0
+    )
+  ) {
+    fail('accept review cannot retain unresolved work; use revise or reject')
+  }
+  return validated
+}
+
+function requiresNonAbstractEvidence(config: Stage1WorkflowConfig): boolean {
+  return config.exclude?.some(item => item.trim().toLowerCase() === ABSTRACT_ONLY_EXCLUSION) ?? false
+}
+
+function enforceNodeEvidencePolicy(
+  config: Stage1WorkflowConfig,
+  node: PaperNode,
+  catalog: EvidenceCatalog,
+): void {
+  if (!requiresNonAbstractEvidence(config)) return
+  const artifact = catalog.getPaper(node.paper_id)
+  if (artifact?.full_text_source === undefined) {
+    throw new SupraMasDomainError(
+      `paper ${node.paper_id} has no durable full-text source required by the task policy`,
+      'SUPRAMAS_EVIDENCE_POLICY_VIOLATION',
+    )
+  }
+  const evidence = [
+    ...node.strategy_records.map(record => record.evidence),
+    ...node.limitation_records.map(record => record.evidence),
+  ]
+  if (!evidence.some(reference => catalog.verify(node.paper_id, reference).evidence_kind === 'full_text')) {
+    throw new SupraMasDomainError(
+      `paper ${node.paper_id} cites only abstract evidence while the task excludes abstract-only evidence`,
+      'SUPRAMAS_EVIDENCE_POLICY_VIOLATION',
+    )
+  }
+}
+
+function enforceReviewSemantics(
+  pending: Stage1PendingCandidate,
+  review: Stage1ReviewSubmission,
+): void {
+  if (pending.scope === 'root') {
+    if (review.expectation_satisfaction !== 'not_applicable') {
+      throw new SupraMasDomainError(
+        'root review expectation_satisfaction must be not_applicable',
+        'SUPRAMAS_EDGE_TYPE_MISMATCH',
+      )
+    }
+    return
+  }
+  if (review.expectation_satisfaction === 'not_applicable') {
+    throw new SupraMasDomainError(
+      'child review must assess expectation satisfaction',
+      'SUPRAMAS_EDGE_TYPE_MISMATCH',
+    )
+  }
+  if (review.decision !== 'accept') return
+  const edge = pending.edge
+  /* v8 ignore next -- every pending child candidate is validated with an edge before review. */
+  if (edge === undefined) fail('accepted child review has no proposed edge')
+  const expected = EXPECTED_EDGE_TYPE[review.expectation_satisfaction]
+  if (expected === undefined || edge.edge_type !== expected) {
+    throw new SupraMasDomainError(
+      `child expectation satisfaction ${review.expectation_satisfaction} cannot be accepted as ${edge.edge_type}`,
+      'SUPRAMAS_EDGE_TYPE_MISMATCH',
+    )
+  }
+}
+
+function enforceAcceptedWorkflowPolicies(workflow: Stage1Workflow, catalog: EvidenceCatalog): void {
+  for (const node of workflow.nodes) {
+    enforceNodeEvidencePolicy(workflow.config, node, catalog)
+    const scope = node.parent_id === null ? 'root' : 'child'
+    const accepted = [...workflow.review_log].reverse().find(entry =>
+      entry.scope === scope && entry.paper_id === node.paper_id && entry.decision === 'accept')
+    if (accepted === undefined) {
+      throw new SupraMasDomainError(
+        `accepted ${scope} ${node.paper_id} has no accepted reviewer entry`,
+        'SUPRAMAS_EDGE_TYPE_MISMATCH',
+      )
+    }
+    if (workflow.config.requireAgentHandoffs === true && accepted.reviewer_run_id === undefined) {
+      fail(`accepted ${scope} ${node.paper_id} has no reviewer subagent run id`)
+    }
+    const review = validateReview(accepted)
+    const edge = scope === 'child'
+      ? workflow.edges.find(item => item.child_node_id === node.node_id)
+      : undefined
+    if (scope === 'child' && edge === undefined) {
+      throw new SupraMasDomainError(
+        `accepted child ${node.paper_id} has no accepted edge`,
+        'SUPRAMAS_EDGE_TYPE_MISMATCH',
+      )
+    }
+    enforceReviewSemantics({
+      scope,
+      attempt_index: accepted.attempt_index,
+      revision_round: accepted.revision_round,
+      node,
+      ...(edge === undefined ? {} : { edge }),
+    }, review)
   }
 }
 
@@ -348,7 +479,7 @@ function validateProspective(
 function updateAttempt(
   workflow: Stage1Workflow,
   pending: Stage1PendingCandidate,
-  update: Partial<Pick<Stage1BuilderAttempt, 'status' | 'revision_round' | 'reason'>>,
+  update: Partial<Pick<Stage1BuilderAttempt, 'status' | 'revision_round' | 'builder_run_id' | 'reason'>>,
 ): void {
   const attempt = [...workflow.builder_attempts].reverse().find(candidate =>
     candidate.scope === pending.scope
@@ -442,6 +573,7 @@ export function createStage1Workflow(config: Stage1WorkflowConfig): Stage1Workfl
     ...(config.targetChildNodes === undefined
       ? {}
       : { targetChildNodes: optionalCap(config.targetChildNodes, 'workflow.targetChildNodes') ?? null }),
+    requireAgentHandoffs: config.requireAgentHandoffs === true,
   }
   return {
     status: 'active',
@@ -521,6 +653,12 @@ export function submitStage1Builder(
   if (next.kind !== 'build_root' && next.kind !== 'build_child' && next.kind !== 'revise_candidate') {
     fail(`builder submission is not legal while next action is ${next.kind}`)
   }
+  if (workflow.config.requireAgentHandoffs === true && submission.builder_run_id === undefined) {
+    fail('builder submission requires a builder subagent run id')
+  }
+  const builderRunId = submission.builder_run_id === undefined
+    ? undefined
+    : nonempty(submission.builder_run_id, 'builder.builder_run_id')
   const updated = clone(workflow)
   if (next.kind === 'revise_candidate') {
     const pending = updated.pending_candidate
@@ -542,7 +680,11 @@ export function submitStage1Builder(
     else pending.edge = edge
     pending.revision_round += 1
     delete pending.reviewer_feedback
-    updateAttempt(updated, pending, { status: 'review_pending', revision_round: pending.revision_round })
+    updateAttempt(updated, pending, {
+      status: 'review_pending',
+      revision_round: pending.revision_round,
+      ...(builderRunId === undefined ? {} : { builder_run_id: builderRunId }),
+    })
     return updated
   }
 
@@ -558,6 +700,7 @@ export function submitStage1Builder(
       ...(frontierKey === undefined ? {} : { frontier_key: frontierKey }),
       revision_round: 0,
       status: 'no_candidate',
+      ...(builderRunId === undefined ? {} : { builder_run_id: builderRunId }),
       reason: nonempty(submission.reason ?? 'builder returned no candidate', 'builder.reason'),
     })
     exhaustCurrent(updated, scope, frontierKey)
@@ -578,6 +721,7 @@ export function submitStage1Builder(
       revision_round: 0,
       status: 'no_edge_proposed',
       paper_id: node.paper_id,
+      ...(builderRunId === undefined ? {} : { builder_run_id: builderRunId }),
       reason: nonempty(submission.reason ?? 'builder returned no proposed edge', 'builder.reason'),
     })
     exhaustCurrent(updated, scope, frontierKey)
@@ -598,6 +742,7 @@ export function submitStage1Builder(
     revision_round: 0,
     status: 'review_pending',
     paper_id: node.paper_id,
+    ...(builderRunId === undefined ? {} : { builder_run_id: builderRunId }),
   })
   updated.pending_candidate = {
     scope,
@@ -629,7 +774,12 @@ export function submitStage1Review(
   const pending = updated.pending_candidate
   /* v8 ignore next -- review_candidate is emitted only for an unreviewed pending candidate. */
   if (pending === undefined || pending.reviewer_feedback !== undefined) fail('review has no pending candidate')
+  if (updated.config.requireAgentHandoffs === true && submission.reviewer_run_id === undefined) {
+    fail('review submission requires a reviewer subagent run id')
+  }
   const review = validateReview(submission)
+  enforceReviewSemantics(pending, review)
+  if (review.decision === 'accept') enforceNodeEvidencePolicy(updated.config, pending.node, catalog)
   updated.review_log.push({
     ...review,
     review_round: updated.review_log.length + 1,
@@ -691,6 +841,7 @@ export function finalizeStage1Workflow(
 ): FinalizedStage1Workflow {
   const next = nextStage1Action(workflow)
   if (next.kind !== 'finalize') fail(`workflow cannot finalize while next action is ${next.kind}`)
+  enforceAcceptedWorkflowPolicies(workflow, catalog)
   const tree = validateStrategyTree(treeOf(workflow), catalog)
   const completed = clone(workflow)
   completed.status = 'completed'
@@ -717,6 +868,7 @@ export function validateStage1Workflow(
     }
   } else {
     validateStrategyTree(treeOf(validated), catalog)
+    enforceAcceptedWorkflowPolicies(validated, catalog)
   }
 
   const frontierKeys = new Set<string>()
@@ -755,6 +907,7 @@ export function validateStage1Workflow(
   if (validated.status === 'completed') {
     if (pending !== undefined) fail('a completed workflow cannot retain a pending candidate')
     validateStrategyTree(treeOf(validated), catalog)
+    enforceAcceptedWorkflowPolicies(validated, catalog)
   } else if (validated.status === 'failed') {
     nonempty(validated.failure ?? '', 'workflow.failure')
   } else {

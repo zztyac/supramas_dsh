@@ -100,6 +100,20 @@ describe('SupraMAS Stage 1 domain contract', () => {
     expect(validated.nodes[0]).not.toBe(tree.nodes[0])
   })
 
+  it('lists paper artifacts in import order without exposing mutable catalog state', () => {
+    const evidence = catalog()
+    const listed = evidence.listPapers()
+    const listedPaper = fixtureAt(listed, 0, 'listed paper')
+    listedPaper.paper_title = 'mutated outside the catalog'
+    fixtureAt(listedPaper.chunks, 0, 'listed chunk').text = 'mutated chunk'
+
+    expect(evidence.listPapers().map(paper => paper.paper_id)).toEqual(['paper-1'])
+    expect(evidence.getPaper('paper-1')).toMatchObject({
+      paper_title: 'BZO pinning in REBCO',
+      chunks: [{ text: 'The BZO film retained high in-field Jc at 77 K and 5 T.' }],
+    })
+  })
+
   it('rejects evidence that is absent from or disagrees with its local chunk', () => {
     const missing = rootTree()
     fixtureAt(fixtureAt(missing.nodes, 0, 'node').strategy_records, 0, 'strategy record').evidence.chunk_id = 'missing'

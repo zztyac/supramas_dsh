@@ -4,7 +4,6 @@ import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { deadline, timeoutOf } from '@deepseek-ai/dsh-timeout'
 import {
-  isSameOrigin,
   publicHttpNetwork,
   validateFetchUrl,
   type PinnedResponse,
@@ -25,7 +24,7 @@ const PROVIDER_ID = 'http'
 export interface Config {
   /** Maximum wall-clock milliseconds for one complete acquisition. */
   readonly timeoutMs?: number
-  /** Maximum same-origin redirects followed before rejecting the source. */
+  /** Maximum independently validated public redirects followed before rejecting the source. */
   readonly maxRedirects?: number
   /** Non-empty HTTP User-Agent sent to scholarly document hosts. */
   readonly userAgent?: string
@@ -139,10 +138,6 @@ export class HttpPaperAcquisitionProvider implements PaperAcquisitionProvider {
             throw new LiteratureError('paper redirect has no Location header', 'SUPRAMAS_LITERATURE_REDIRECT_BLOCKED')
           }
           const target = validateFetchUrl(new URL(location, current).toString())
-          if (!isSameOrigin(current, target)) {
-            await response.body?.cancel()
-            throw new LiteratureError('cross-origin paper redirect is blocked', 'SUPRAMAS_LITERATURE_REDIRECT_BLOCKED')
-          }
           await response.body?.cancel()
           current = target
           redirects++

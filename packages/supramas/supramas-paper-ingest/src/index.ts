@@ -115,6 +115,13 @@ export class SupraMasPaperIngest extends Service {
         paper_title: acquired.candidate.title,
         local_path: artifactPath,
         source_type: sourceType,
+        full_text_source: {
+          local_path: sourcePath,
+          media_type: 'application/pdf',
+          sha256: acquired.sha256,
+          byte_length: acquired.byteLength,
+          page_count: parsed.pages.length,
+        },
       },
       chunks,
     })

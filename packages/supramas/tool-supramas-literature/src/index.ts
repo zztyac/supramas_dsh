@@ -192,6 +192,30 @@ function resolveConfig(config: Config): ResolvedConfig {
 }
 
 function failure(error: LiteratureError | SupraMasError | SupraMasDomainError): ToolEnvelope {
+  const recoverableImportCodes = new Set([
+    'SUPRAMAS_LITERATURE_SOURCE_UNAVAILABLE',
+    'SUPRAMAS_LITERATURE_SOURCE_BLOCKED',
+    'SUPRAMAS_LITERATURE_REDIRECT_BLOCKED',
+    'SUPRAMAS_LITERATURE_HTTP_STATUS',
+    'SUPRAMAS_LITERATURE_UNSUPPORTED_MEDIA',
+    'SUPRAMAS_LITERATURE_TOO_LARGE',
+    'SUPRAMAS_LITERATURE_NO_TEXT',
+    'SUPRAMAS_LITERATURE_PARSE_FAILED',
+  ])
+  if (recoverableImportCodes.has(error.code)) {
+    return {
+      status: 'error',
+      summary: error.message,
+      next_actions: ['select_another_open_access_candidate', 'refine_literature_query'],
+      artifacts: [],
+      error: {
+        code: error.code,
+        root_cause_hint: error.message,
+        safe_retry: 'Select another open-access candidate or refine the query within the current real attempt budget.',
+        stop_condition: 'Never persist or cite a search-result abstract as fallback evidence; return no candidate when the budget is exhausted.',
+      },
+    }
+  }
   return {
     status: 'error',
     summary: error.message,
@@ -236,7 +260,7 @@ export function apply(ctx: Context, config: Config): void {
 
   ctx.tools.register(defineTool({
     name: 'supramas_literature_search',
-    description: 'Search a structured scholarly index and return bounded opaque candidates without document download URLs.',
+    description: 'Search a structured scholarly index for discovery only; returned abstracts are never admissible evidence.',
     parameters: {
       query: { type: 'string', required: true, description: 'Specific material-science literature query.' },
       max_results: { type: 'integer', required: true, description: 'Requested candidates within the configured tool cap.' },
@@ -264,7 +288,7 @@ export function apply(ctx: Context, config: Config): void {
 
   ctx.tools.register(defineTool({
     name: 'supramas_paper_import',
-    description: 'Acquire, verify, parse, chunk, and atomically persist one service-issued open-access paper candidate.',
+    description: 'Acquire, verify, parse, chunk, and atomically persist one service-issued open-access full-text paper candidate.',
     parameters: {
       run_id: { type: 'string', required: true, description: 'Owning deterministic SupraMAS run id.' },
       candidate_id: { type: 'string', required: true, description: 'Opaque candidate id returned by supramas_literature_search.' },

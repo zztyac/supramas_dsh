@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
@@ -94,16 +95,26 @@ async function complete(ctx: Context) {
     runDir: 'runs/artifact-demo',
   })
   const ready = await ctx.supramas.transition(created, { phase: 'task_ready' })
+  const source = new TextEncoder().encode('%PDF-1.7\nfull-text fixture')
+  const sourcePath = await ctx.supramasArtifacts.writePaperSource(ready.id, 'paper-1', source)
   await ctx.supramas.storePaper(ready.id, {
     paper_id: 'paper-1',
     paper_title: 'BZO pinning paper',
     local_path: 'runs/artifact-demo/papers/paper-1.json',
     source_type: 'experimental',
+    full_text_source: {
+      local_path: sourcePath,
+      media_type: 'application/pdf',
+      sha256: createHash('sha256').update(source).digest('hex'),
+      byte_length: source.byteLength,
+      page_count: 1,
+    },
   })
   await ctx.supramas.addEvidenceChunk(ready.id, 'paper-1', {
     chunk_id: 'paper-1-c1',
     page: 1,
     text: 'BZO additions improve in-field Jc, but only one loading was measured.',
+    evidence_kind: 'full_text',
   })
   const started = await ctx.supramas.startStage1(ready, {
     jobId: 'artifact-demo',
@@ -124,6 +135,7 @@ async function complete(ctx: Context) {
   })
   const revised = await ctx.supramas.submitStage1Review(built.run, {
     decision: 'revise',
+    expectation_satisfaction: 'not_applicable',
     summary: 'Narrow one claim before acceptance.',
     critical_issues: [{ target_id: 'R1', issue: 'Use the literal result.', required_action: 'revise' }],
     edge_issues: [],
@@ -136,6 +148,7 @@ async function complete(ctx: Context) {
   })
   const accepted = await ctx.supramas.submitStage1Review(rebuilt.run, {
     decision: 'accept',
+    expectation_satisfaction: 'not_applicable',
     summary: 'The local evidence supports the revised candidate.',
     critical_issues: [],
     edge_issues: [],
@@ -183,6 +196,7 @@ describe('SupraMAS compatibility artifacts', () => {
     expect(first.files).toEqual([
       'runs/artifact-demo/input_task.yaml',
       'runs/artifact-demo/papers/paper-1.json',
+      'runs/artifact-demo/papers/raw/paper-1.pdf',
       'runs/artifact-demo/tree_state.json',
       'runs/artifact-demo/outputs/strategy_tree.json',
       'runs/artifact-demo/outputs/node_review_log.jsonl',
@@ -198,14 +212,14 @@ describe('SupraMAS compatibility artifacts', () => {
     expect(paper).toMatchObject({ paper_id: 'paper-1', doi: '10.0000/example' })
     expect(paper['chunks']).toHaveLength(1)
 
-    const tree = JSON.parse(await readFile(join(root, first.files[3]!), 'utf8')) as Record<string, unknown>
+    const tree = JSON.parse(await readFile(join(root, first.files[4]!), 'utf8')) as Record<string, unknown>
     expect(tree).toMatchObject({ job_id: 'artifact-demo', nodes: [{ paper_id: 'paper-1' }] })
-    const reviews = (await readFile(join(root, first.files[4]!), 'utf8'))
+    const reviews = (await readFile(join(root, first.files[5]!), 'utf8'))
       .trim()
       .split('\n')
       .map(line => JSON.parse(line) as { decision: string })
     expect(reviews.map(review => review.decision)).toEqual(['revise', 'accept'])
-    expect(await readFile(join(root, first.files[5]!), 'utf8').then(text => text.includes('Exported nodes: `1`')))
+    expect(await readFile(join(root, first.files[6]!), 'utf8').then(text => text.includes('Exported nodes: `1`')))
       .toBe(true)
     expect(await readdir(join(root, 'runs/artifact-demo/outputs'))).toEqual([
       'node_review_log.jsonl',

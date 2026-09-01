@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-This package materializes a durable SupraMAS Stage 1 run as the canonical `runs/<jobId>` file layout used by the Codex-native workflow. It writes the approved task, stored paper metadata and chunks, restart state, final strategy tree, review log, and review report below one configured workspace root. It also serves bounded reads of the three canonical outputs to trusted Host consumers. Repeating an export replaces complete files atomically and produces the same bytes for unchanged durable state.
+This package materializes a durable SupraMAS Stage 1 run as the canonical `runs/<jobId>` file layout used by the Codex-native workflow. It writes the approved task, raw source PDFs, paper metadata and chunks, restart state, final strategy tree, review log, and review report below one configured workspace root. Completed synchronization verifies that every declared raw PDF still exists before publishing the manifest.
 
 ## Table of Contents
 
@@ -75,8 +75,8 @@ None; this service adds no prompt or tool schema by itself.
 
 <a id="known-limitations-and-deferred-work"></a>
 
-- The package exports stored metadata and text chunks; it does not acquire or parse PDFs.
-- Final export requires every accepted paper to exist in the durable per-run evidence catalog.
+- The package persists bytes supplied by the ingestion service but does not acquire or parse PDFs.
+- Final export requires every accepted paper to exist in the durable evidence catalog and every declared raw PDF to exist at its canonical path.
 - `readOutput()` rejects files beyond the requested limit instead of streaming or returning partial content.
 - The renderer implements the SupraMAS Stage 1 contract and is not a generic YAML serialization service.
 

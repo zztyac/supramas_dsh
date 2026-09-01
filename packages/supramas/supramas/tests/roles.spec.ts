@@ -56,6 +56,7 @@ describe('SupraMAS role contracts', () => {
       'supramas_chunk_read',
       'supramas_evidence_verify',
     ])
+    expect(reviewer.outputSchema).toBe('supramas.reviewer.v2')
   })
 
   it('fails loud for an unknown role', () => {
