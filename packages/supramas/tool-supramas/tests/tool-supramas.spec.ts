@@ -82,6 +82,44 @@ function fakeAgent(id = 'supramas-parent'): Agent {
 }
 
 describe('dsh-tool-supramas', () => {
+  it('downgrades evidence-fragment accepts into reviewer-guided revisions', () => {
+    const node = {
+      paper_id: 'paper-weak',
+      paper_title: 'Weak evidence paper',
+      source_type: 'review' as const,
+      strategy_records: [{
+        record_id: 'R1',
+        tuning_dimension: 'Composition tuning' as const,
+        tuning_strategy: 'Add BHO nanorods.',
+        tuning_effect: 'Fp reaches 28 GN/m3 at 77 K and 15.8 T.',
+        evidence: { chunk_id: 'c1', page: 10, evidence_text: 'significantly enhanced in-field Jc' },
+        confidence: 0.85,
+      }],
+      limitation_records: [{
+        limitation_id: 'L1',
+        limitation: 'Angular pinning weakens away from the c-axis.',
+        expectation: 'Add isotropic pins.',
+        evidence: { chunk_id: 'c2', page: 11, evidence_text: 'as applied magnetic field direction changes' },
+        confidence: 0.8,
+      }],
+    }
+    const issues = ToolSupraMas.auditPaperNodeEvidence(node)
+    const reviewed = ToolSupraMas.evidenceAuditedReview({
+      decision: 'accept',
+      expectation_satisfaction: 'not_applicable',
+      summary: 'Model accepted the root.',
+      critical_issues: [],
+      edge_issues: [],
+      acceptance_conditions: [],
+    }, issues)
+
+    expect(issues.some(issue => issue.target_id === 'R1' && issue.issue.includes('at least 120'))).toBe(true)
+    expect(issues.some(issue => issue.target_id === 'R1' && issue.issue.includes('28, 3, 77, 15.8'))).toBe(true)
+    expect(issues.some(issue => issue.target_id === 'L1' && issue.issue.includes('at least 120'))).toBe(true)
+    expect(reviewed.decision).toBe('revise')
+    expect(reviewed.critical_issues.some(issue => issue.target_id === 'R1')).toBe(true)
+  })
+
   it('registers the run and evidence model-facing tools', async () => {
     const ctx = await setup()
     expect(ctx.tools.schemas().map(schema => schema.name)).toEqual([
@@ -362,6 +400,14 @@ describe('dsh-tool-supramas', () => {
       })
     }
     expect(start).toHaveBeenCalledOnce()
+    expect(start.mock.calls[0]?.[1].toolFilter?.allow).toEqual([
+      'web_search',
+      'supramas_literature_search',
+      'supramas_paper_import',
+      'supramas_chunk_list',
+      'supramas_chunk_read',
+      'supramas_evidence_verify',
+    ])
     expect(dispose).toHaveBeenCalledOnce()
     expect(ctx.supramas.getStage1(ready.id)).toMatchObject({
       run: { revision: before.run.revision },

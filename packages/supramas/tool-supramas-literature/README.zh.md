@@ -32,7 +32,7 @@ kind: "package-reference"
     maxChunkReadChars: 20000
 ```
 
-Builder 角色获得 `supramas_literature_search`、`supramas_paper_import`、`supramas_chunk_list` 和 `supramas_chunk_read`。Reviewer 角色只获得列表/读取工具及独立的字面证据验证器。检索摘要只用于发现；builder 必须成功导入完整 PDF 后才能提交节点。
+Builder 角色获得 `supramas_literature_search`、`supramas_paper_import`、`supramas_chunk_list` 和 `supramas_chunk_read`。Reviewer 角色只获得列表/读取工具及独立的字面证据验证器。检索摘要只用于发现；builder 必须成功导入完整 PDF 后才能提交节点。当索引文档被阻断时，`supramas_paper_import.document_url` 可以传入网页检索发现的同一不透明候选论文的公开 PDF 直链。公共网络传输仍执行 SSRF 防护，解析后的 DOI/标题匹配会拒绝错配文档。
 
 <a id="model-experience"></a>
 
@@ -58,10 +58,10 @@ Builder 角色获得 `supramas_literature_search`、`supramas_paper_import`、`s
 
 - 检索能力取决于已挂载的结构化索引提供器集合。
 - 分块分页按字符计算，不按 token 计算。
-- 导入失败会返回“改选开放获取候选”或“细化检索”的恢复指引，绝不授权回退到摘要证据。
+- 导入失败会返回“尝试同一候选的已验证公开 PDF”“改选开放获取候选”或“细化检索”的恢复指引，绝不授权回退到摘要证据。
 
 <a id="dev-note"></a>
 
 ### 开发备注
 
-不得增加任意 URL、输出路径、解释器或解析脚本参数。二进制和整篇文档内容必须保留在服务边界之后。
+不得削弱 `document_url` 的公共网络校验或候选身份匹配。输出路径、解释器、解析脚本、二进制和整篇文档内容必须保留在服务边界之后。

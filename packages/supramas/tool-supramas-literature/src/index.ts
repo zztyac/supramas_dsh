@@ -198,6 +198,7 @@ function failure(error: LiteratureError | SupraMasError | SupraMasDomainError): 
     'SUPRAMAS_LITERATURE_REDIRECT_BLOCKED',
     'SUPRAMAS_LITERATURE_HTTP_STATUS',
     'SUPRAMAS_LITERATURE_UNSUPPORTED_MEDIA',
+    'SUPRAMAS_LITERATURE_IDENTITY_MISMATCH',
     'SUPRAMAS_LITERATURE_TOO_LARGE',
     'SUPRAMAS_LITERATURE_NO_TEXT',
     'SUPRAMAS_LITERATURE_PARSE_FAILED',
@@ -293,6 +294,10 @@ export function apply(ctx: Context, config: Config): void {
       run_id: { type: 'string', required: true, description: 'Owning deterministic SupraMAS run id.' },
       candidate_id: { type: 'string', required: true, description: 'Opaque candidate id returned by supramas_literature_search.' },
       source_type: { type: 'string', required: true, enum: SOURCE_TYPES, description: 'Scientific source classification.' },
+      document_url: {
+        type: 'string',
+        description: 'Optional direct public PDF URL discovered by web search for this same candidate when its indexed URL fails.',
+      },
     },
     output,
     async execute(args, exec) {
@@ -302,6 +307,7 @@ export function apply(ctx: Context, config: Config): void {
           args.candidate_id,
           args.source_type,
           exec.signal,
+          args.document_url,
         )
         return {
           status: 'success',

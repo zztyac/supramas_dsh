@@ -438,11 +438,16 @@ const reviewerHandoffSchema = {
 const BUILDER_PERSONA = `You are the SupraMAS Stage 1 strategy builder. Execute exactly one bounded
 build_root, build_child, or revise_candidate action from the supplied durable state. When
 available_imported_papers is non-empty, choose exactly one listed paper, do not search or import, and read
-only the bounded chunks needed for the result. When it is empty, make at most one search request and at
-most two import attempts, then stop discovery after the first supported full-text candidate. Search
+only the bounded chunks needed for the result. When it is empty, make at most two web searches, three
+structured literature searches, and six import attempts, then stop discovery after the first supported
+full-text candidate. If an indexed PDF returns 403, times out, or is not a PDF, use web_search with the
+candidate DOI or exact title to find a direct public PDF and retry supramas_paper_import for the same
+candidate with document_url. Search
 abstracts are discovery metadata and must never be cited. Every evidence_text must be a literal substring
-of its cited full_text chunk. Before returning, call supramas_evidence_verify for every proposed evidence
-quote and correct any mismatch against supramas_chunk_read; never return an unverified quote. On revision,
+of its cited full_text chunk and must contain complete supporting sentences rather than labels or sentence
+fragments. It must cover every number, comparison, material/process qualifier, and mechanism asserted by
+the record. Before returning, call supramas_evidence_verify for every proposed evidence quote and correct
+any mismatch against supramas_chunk_read; never return an unverified quote. On revision,
 keep the same paper and address every reviewer condition. Never review, accept, submit workflow state, or
 assemble a tree. Finish promptly with exactly one structured result matching the required schema; use null
 paper_node when no supported full-text candidate exists and null edge for a root or unsupported child bridge.
@@ -452,7 +457,10 @@ same record. Self-check these edge links before returning.`
 
 const REVIEWER_PERSONA = `You are the independent SupraMAS Stage 1 evidence reviewer. Review exactly one
 pending paper candidate and proposed edge from the supplied durable state. Read the local chunks and use
-supramas_evidence_verify for every cited quote. Never mutate evidence, search for replacement papers,
+supramas_evidence_verify for every cited quote. Treat deterministic_evidence_audit findings as mandatory
+revision conditions. Independently reject sentence fragments, material-name-only quotes, and evidence that
+omits any number, comparison, qualifier, result, or mechanism asserted by its record. Never mutate evidence,
+search for replacement papers,
 submit workflow state, or assemble a tree. Root reviews use not_applicable. For children, full maps to
 direct, partial to transferable, adjacent to exploratory, and none cannot be accepted. An accept decision
 must have empty critical_issues, edge_issues, and acceptance_conditions; return revise or reject whenever
@@ -522,6 +530,75 @@ interface HandoffPaperSummary {
   source_type: string
   page_count: number
   chunk_count: number
+}
+
+export interface EvidenceAuditIssue {
+  target_id: string
+  issue: string
+  required_action: 'revise'
+}
+
+const MIN_EVIDENCE_QUOTE_CHARS = 120
+
+function numericFacts(value: string): string[] {
+  return [...new Set(value.match(/\d+(?:[.,]\d+)*/g) ?? [])]
+}
+
+/** Deterministically reject evidence fragments and numeric claims absent from their literal quote. */
+export function auditPaperNodeEvidence(
+  node: NonNullable<Stage1BuilderSubmission['paper_node']>,
+): EvidenceAuditIssue[] {
+  const issues: EvidenceAuditIssue[] = []
+  const inspect = (targetId: string, claim: string, evidenceText: string) => {
+    const quote = evidenceText.trim()
+    if (quote.length < MIN_EVIDENCE_QUOTE_CHARS) {
+      issues.push({
+        target_id: targetId,
+        issue: `Evidence quote has ${quote.length} characters; provide complete supporting sentences of at least ${MIN_EVIDENCE_QUOTE_CHARS} characters or narrow the claim.`,
+        required_action: 'revise',
+      })
+    }
+    const evidenceNumbers = new Set(numericFacts(quote))
+    const missing = numericFacts(claim).filter(value => !evidenceNumbers.has(value))
+    if (missing.length > 0) {
+      issues.push({
+        target_id: targetId,
+        issue: `Evidence quote does not contain claimed numeric value(s): ${missing.join(', ')}. Add literal support or remove the unsupported values.`,
+        required_action: 'revise',
+      })
+    }
+  }
+  for (const record of node.strategy_records) {
+    inspect(record.record_id, `${record.tuning_strategy} ${record.tuning_effect}`, record.evidence.evidence_text)
+  }
+  for (const record of node.limitation_records) {
+    inspect(record.limitation_id, record.limitation, record.evidence.evidence_text)
+  }
+  return issues
+}
+
+/** Convert an unsafe model accept into a durable reviewer-guided revision. */
+export function evidenceAuditedReview(
+  review: Stage1ReviewSubmission,
+  issues: readonly EvidenceAuditIssue[],
+): Stage1ReviewSubmission {
+  if (review.decision === 'reject' || issues.length === 0) return review
+  return {
+    ...review,
+    decision: 'revise',
+    summary: `${review.summary} Deterministic evidence audit requires revision before acceptance.`,
+    critical_issues: [...review.critical_issues, ...issues],
+    edge_issues: [...review.edge_issues],
+    acceptance_conditions: [
+      ...review.acceptance_conditions,
+      ...issues.map(issue => `${issue.target_id}: ${issue.issue}`),
+    ],
+  }
+}
+
+function evidenceAudit(state: Stage1RunState): EvidenceAuditIssue[] {
+  const node = state.workflow.pending_candidate?.node
+  return node === undefined ? [] : auditPaperNodeEvidence(node)
 }
 
 function summarizePaper(paper: PaperArtifact): HandoffPaperSummary {
@@ -614,6 +691,7 @@ function handoffPrompt(
       workflow: state.workflow,
       next_action: state.nextAction,
       available_imported_papers: availablePapers,
+      ...(kind === 'reviewer' ? { deterministic_evidence_audit: evidenceAudit(state) } : {}),
     }, null, 2),
   ].join('\n\n')
 }
@@ -953,7 +1031,7 @@ export function apply(ctx: Context, config: Config): void {
               timeoutMs: config.handoffTimeoutMs ?? 600_000,
               toolFilter: {
                 allow: [
-                  ...(allowDiscovery ? ['supramas_literature_search', 'supramas_paper_import'] : []),
+                  ...(allowDiscovery ? ['web_search', 'supramas_literature_search', 'supramas_paper_import'] : []),
                   'supramas_chunk_list',
                   'supramas_chunk_read',
                   'supramas_evidence_verify',
@@ -1010,9 +1088,10 @@ export function apply(ctx: Context, config: Config): void {
                 allow: ['supramas_chunk_list', 'supramas_chunk_read', 'supramas_evidence_verify'],
               },
             })
+            const reviewed = evidenceAuditedReview(handoff.value, evidenceAudit(current))
             const state = await ctx.supramas.submitStage1Review(
               { id: runId, revision: args.revision },
-              { ...handoff.value, reviewer_run_id: handoff.runId },
+              { ...reviewed, reviewer_run_id: handoff.runId },
             )
             return stage1Envelope(state, `Recorded attested reviewer handoff for ${state.run.jobId}.`)
           } catch (error) {

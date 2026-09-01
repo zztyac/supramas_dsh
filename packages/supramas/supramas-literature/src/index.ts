@@ -411,16 +411,17 @@ export class SupraMasLiterature extends Service {
    * @param signal - Optional cancellation signal forwarded through acquisition.
    * @returns complete verified PDF bytes plus safe candidate metadata and digest.
    */
-  async acquire(candidateId: string, signal?: AbortSignal): Promise<AcquiredPaper> {
+  async acquire(candidateId: string, signal?: AbortSignal, documentUrl?: string): Promise<AcquiredPaper> {
     const candidate = await this.resolve(candidateId, signal)
-    if (candidate.documentUrl === undefined) {
+    const sourceUrl = documentUrl?.trim() || candidate.documentUrl
+    if (sourceUrl === undefined) {
       throw new LiteratureError(
         `candidate ${candidateId} has no resolved open document`,
         'SUPRAMAS_LITERATURE_SOURCE_UNAVAILABLE',
       )
     }
     const provider = selectedProvider(this.acquisitionProviders, this.configuredAcquisitionProvider)
-    const result = await provider.acquire({ url: candidate.documentUrl, maxBytes: this.maxDocumentBytes }, signal)
+    const result = await provider.acquire({ url: sourceUrl, maxBytes: this.maxDocumentBytes }, signal)
     if (result.statusCode < 200 || result.statusCode >= 300) {
       throw new LiteratureError(
         `paper source returned HTTP ${result.statusCode}`,

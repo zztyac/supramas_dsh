@@ -87,7 +87,7 @@ async function setup(): Promise<Context> {
   const parser: DocumentParserProvider = {
     id: 'pypdf',
     available: () => true,
-    parse: vi.fn(() => Promise.resolve({ pages: [{ pageNumber: 1, text: 'BZO nanorods improve in-field current density and reveal a loading limitation.' }] })),
+    parse: vi.fn(() => Promise.resolve({ pages: [{ pageNumber: 1, text: 'BZO pinning in REBCO: nanorods improve in-field current density and reveal a loading limitation.' }] })),
   }
   ctx.supramasLiterature.registerIndexProvider(index)
   ctx.supramasLiterature.registerAcquisitionProvider(acquisition)
@@ -146,8 +146,24 @@ describe('SupraMAS bounded literature tools', () => {
     })
     expect(read.isError).toBe(false)
     if (read.isError) throw new Error('expected chunk read success')
-    expect(read.value).toMatchObject({ data: { chunk: { text: 'BZO nanorods im', offset: 0, next_offset: 15, truncated: true } } })
+    expect(read.value).toMatchObject({ data: { chunk: { text: 'BZO pinning in ', offset: 0, next_offset: 15, truncated: true } } })
     expect((read.value as { data: { chunk: { text: string } } }).data.chunk.text).toHaveLength(15)
+  })
+
+  it('passes a web-discovered public PDF fallback through the bounded import transaction', async () => {
+    const ctx = await setup()
+    const imported = await call(ctx, 'supramas_paper_import', {
+      run_id: 'supramas:tools-demo',
+      candidate_id: 'openalex:W1',
+      source_type: 'experimental',
+      document_url: 'https://repository.example.edu/W1.pdf',
+    })
+    expect(imported.isError).toBe(false)
+    if (imported.isError) throw new Error('expected fallback import success')
+    expect(imported.value).toMatchObject({
+      status: 'success',
+      data: { imported: { paperTitle: 'BZO pinning in REBCO' } },
+    })
   })
 
   it('returns stable error envelopes for unsafe bounds and missing evidence', async () => {

@@ -66,7 +66,7 @@ async function setup(parser: DocumentParserProvider) {
   ctx.supramasLiterature.registerParserProvider(parser)
   await ctx.plugin(SupraMasPaperIngest, { maxChunkChars: 30, overlapChars: 5 })
   const run = await ctx.supramas.create({ jobId: 'ingest-demo', inputTaskPath: 'runs/ingest-demo/input_task.yaml', runDir: 'runs/ingest-demo' })
-  return { ctx, run, artifactRoot }
+  return { ctx, run, artifactRoot, acquisition }
 }
 
 describe('SupraMasPaperIngest', () => {
@@ -120,5 +120,45 @@ describe('SupraMasPaperIngest', () => {
       .rejects.toMatchObject({ code: 'SUPRAMAS_LITERATURE_NO_TEXT' })
     expect(ctx.supramas.readPaper(run.id, paperId)).toBeUndefined()
     await expect(readFile(join(artifactRoot, `runs/ingest-demo/papers/${paperId}.json`))).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('accepts a discovered fallback PDF only when parsed text matches the resolved paper identity', async () => {
+    const matchingParser: DocumentParserProvider = {
+      id: 'pypdf',
+      available: () => true,
+      parse: vi.fn(() => Promise.resolve({ pages: [{
+        pageNumber: 1,
+        text: 'Full-text REBCO evidence reports reproducible vortex-pinning measurements.',
+      }] })),
+    }
+    const matching = await setup(matchingParser)
+    await matching.ctx.supramasPaperIngest.importCandidate(
+      matching.run.id,
+      'openalex:W123',
+      'experimental',
+      undefined,
+      'https://repository.example.edu/W123.pdf',
+    )
+    expect(matching.acquisition.acquire).toHaveBeenCalledWith(
+      { url: 'https://repository.example.edu/W123.pdf', maxBytes: 1_000 },
+      undefined,
+    )
+
+    const mismatchedParser: DocumentParserProvider = {
+      id: 'pypdf',
+      available: () => true,
+      parse: vi.fn(() => Promise.resolve({ pages: [{
+        pageNumber: 1,
+        text: 'An unrelated polymer mechanics article with no superconducting content.',
+      }] })),
+    }
+    const mismatched = await setup(mismatchedParser)
+    await expect(mismatched.ctx.supramasPaperIngest.importCandidate(
+      mismatched.run.id,
+      'openalex:W123',
+      'experimental',
+      undefined,
+      'https://repository.example.edu/wrong.pdf',
+    )).rejects.toMatchObject({ code: 'SUPRAMAS_LITERATURE_IDENTITY_MISMATCH' })
   })
 })

@@ -194,6 +194,27 @@ describe('SupraMasLiterature paper acquisition', () => {
     expect(http.acquire).toHaveBeenCalledWith({ url: 'https://example.org/paper.pdf', maxBytes: 100 }, signal)
   })
 
+  it('keeps provider metadata while acquiring an explicitly discovered fallback PDF', async () => {
+    const { literature } = await mount({ acquisitionProvider: 'http', minDocumentBytes: 5, maxDocumentBytes: 100 })
+    literature.registerIndexProvider(provider('openalex'))
+    const http = acquisitionProvider('http')
+    literature.registerAcquisitionProvider(http)
+    const signal = new AbortController().signal
+
+    const result = await literature.acquire(
+      'openalex:W1',
+      signal,
+      'https://repository.example.edu/paper.pdf',
+    )
+
+    expect(result.candidate).toMatchObject({ candidateId: 'openalex:W1', title: baseCandidate.title })
+    expect(result.finalUrl).toBe('https://repository.example.edu/paper.pdf')
+    expect(http.acquire).toHaveBeenCalledWith({
+      url: 'https://repository.example.edu/paper.pdf',
+      maxBytes: 100,
+    }, signal)
+  })
+
   it('fails before acquisition when no open document exists or provider selection is unsafe', async () => {
     const noDocument = provider('openalex')
     noDocument.resolve = () => Promise.resolve(baseCandidate)

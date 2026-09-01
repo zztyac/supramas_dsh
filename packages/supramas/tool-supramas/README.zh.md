@@ -25,13 +25,13 @@ kind: "package-reference"
 
 在 `@deepseek-ai/dsh-tools`、DSH 存储栈、`@deepseek-ai/dsh-subagent`、`@deepseek-ai/dsh-supramas` 和 `@deepseek-ai/dsh-supramas-artifacts` 之后组合本包。默认 `orchestrated` 模式下，coordinator 只向 builder 或 reviewer 提交工具提供 `run_id` 和精确的当前 `revision`。工具会启动一个隔离且受 schema 约束的子智能体，应用角色专属工具过滤器，并原子持久化结构化交接结果与子任务运行 ID。内置 `supramas` preset 使用该模式，不暴露通用子智能体工具。
 
-每次交接默认最多运行 600,000 ms。Builder 启动前，工具会列出当前运行中已经导入且可复用的全文论文；只要存在可用论文，本次子调用就会移除检索与导入工具，要求它读取一篇已有论文，避免重复下载。
+每次交接默认最多运行 600,000 ms。Builder 启动前，工具会列出当前运行中已经导入且可复用的全文论文；只要存在可用论文，本次子调用就会移除检索与导入工具，要求它读取一篇已有论文，避免重复下载。否则，发现阶段会获得有界的结构化检索、网页检索和导入能力，使索引 PDF 被阻断时可以改用同一候选论文的公开 PDF 直链。
 
 <a id="understand-the-implementation"></a>
 
 ## 实现说明
 
-`src/index.ts` 管理十一个 schema，并把运行时和领域失败映射为根因、安全重试与停止条件。证据策略和边语义失败具有独立稳定 code。Builder 与 reviewer 的输出 schema 封闭、子任务深度为一，且工具白名单分别受限。Builder 返回前必须核验每条拟议逐字引文，reviewer 之后再独立重复核验。完成操作导出文件契约，`supramas_artifacts_sync` 从持久状态修复中断的导出；每次工作流修改都要求使用上一调用返回的精确 revision。`direct` 模式仅供可信集成调用方和测试使用，不得在模型侧 preset 中暴露。
+`src/index.ts` 管理十一个 schema，并把运行时和领域失败映射为根因、安全重试与停止条件。证据策略和边语义失败具有独立稳定 code。Builder 与 reviewer 的输出 schema 封闭、子任务深度为一，且工具白名单分别受限。Builder 返回前必须核验每条拟议逐字引文，reviewer 之后再独立重复核验。当引文只是片段或缺少声明的数值时，确定性证据审计会把模型的 `accept` 转换为 `revise`。完成操作导出文件契约，`supramas_artifacts_sync` 从持久状态修复中断的导出；每次工作流修改都要求使用上一调用返回的精确 revision。`direct` 模式仅供可信集成调用方和测试使用，不得在模型侧 preset 中暴露。
 
 失败的原子交接不会增加工作流 revision 或尝试计数。当前进程第一次失败后，会按运行、revision 和角色锁定该交接键；重复调用只返回 `SUPRAMAS_SUBAGENT_HANDOFF_FAILED`，不会再启动高成本子任务。后续新进程可以从同一 revision 恢复并再尝试一次。
 

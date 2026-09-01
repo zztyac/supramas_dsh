@@ -5,7 +5,7 @@ import z from '@deepseek-ai/schemastery'
 import { createHash } from 'node:crypto'
 import type { SupraMasRunIdBrand } from '@deepseek-ai/dsh-supramas'
 import type { SourceType } from '@deepseek-ai/dsh-supramas-domain'
-import { chunkParsedPages } from '@deepseek-ai/dsh-supramas-literature'
+import { chunkParsedPages, LiteratureError } from '@deepseek-ai/dsh-supramas-literature'
 import type {} from '@deepseek-ai/dsh-supramas'
 import type {} from '@deepseek-ai/dsh-supramas-artifacts'
 import type {} from '@deepseek-ai/dsh-supramas-literature'
@@ -38,6 +38,40 @@ export interface PaperImportSummary {
 interface ResolvedConfig {
   readonly maxChunkChars: number
   readonly overlapChars: number
+}
+
+const IDENTITY_STOP_WORDS = new Set([
+  'about', 'after', 'analysis', 'based', 'effects', 'films', 'from', 'into', 'materials',
+  'paper', 'properties', 'study', 'their', 'thin', 'through', 'using', 'with',
+])
+
+function normalizedIdentityText(value: string): string {
+  return value.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
+}
+
+function identityTokens(title: string): string[] {
+  return [...new Set(normalizedIdentityText(title).split(' ')
+    .filter(token => token.length >= 4 && !IDENTITY_STOP_WORDS.has(token)))]
+}
+
+function enforceDiscoveredDocumentIdentity(
+  title: string,
+  doi: string | undefined,
+  pages: readonly { text: string }[],
+): void {
+  const text = normalizedIdentityText(pages.map(page => page.text).join('\n'))
+  const compact = text.replaceAll(' ', '')
+  const normalizedDoi = doi?.replace(/^https?:\/\/(?:dx\.)?doi\.org\//i, '').toLowerCase()
+  if (normalizedDoi !== undefined && compact.includes(normalizedDoi.replace(/[^\p{L}\p{N}]+/gu, ''))) return
+  const tokens = identityTokens(title)
+  const matched = tokens.filter(token => text.includes(token)).length
+  const required = Math.max(1, Math.ceil(tokens.length * 0.6))
+  if (tokens.length === 0 || matched < required) {
+    throw new LiteratureError(
+      'discovered PDF text does not match the resolved candidate title or DOI',
+      'SUPRAMAS_LITERATURE_IDENTITY_MISMATCH',
+    )
+  }
 }
 
 function resolveConfig(config: Config): ResolvedConfig {
@@ -98,14 +132,19 @@ export class SupraMasPaperIngest extends Service {
     candidateId: string,
     sourceType: SourceType = 'unknown',
     signal?: AbortSignal,
+    documentUrl?: string,
   ): Promise<PaperImportSummary> {
     const run = this.ctx.supramas.get(runId)
     if (run === undefined) throw new Error(`supramas-paper-ingest: run ${runId} was not found`)
-    const acquired = await this.ctx.supramasLiterature.acquire(candidateId, signal)
+    const discoveredDocumentUrl = documentUrl?.trim()
+    const acquired = await this.ctx.supramasLiterature.acquire(candidateId, signal, discoveredDocumentUrl)
     const paperId = paperIdForCandidate(acquired.candidate.candidateId)
     const sourcePath = await this.ctx.supramasArtifacts.writePaperSource(runId, paperId, acquired.bytes)
     const absoluteSourcePath = await this.ctx.supramasArtifacts.resolvePaperSourcePath(runId, paperId)
     const parsed = await this.ctx.supramasLiterature.parseDocument(absoluteSourcePath, signal)
+    if (discoveredDocumentUrl) {
+      enforceDiscoveredDocumentIdentity(acquired.candidate.title, acquired.candidate.doi, parsed.pages)
+    }
     const chunks = chunkParsedPages(paperId, parsed.pages, this.config.maxChunkChars, this.config.overlapChars)
     if (chunks.length === 0) throw new Error('supramas-paper-ingest: parser produced no evidence chunks')
     const artifactPath = `runs/${run.jobId}/papers/${paperId}.json`
