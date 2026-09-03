@@ -154,4 +154,11 @@ export interface EvidenceVerification {
   chunk_id: string
   local_path: string
   evidence_kind: EvidenceKind
+  /** Exact chunk substring that downstream records must persist. */
+  canonical_evidence_text?: string
+  /** Whether the submitted selector was already exact or needed whitespace/typography repair. */
+  match_kind?: 'exact' | 'normalized'
+  /** Zero-based exact substring bounds inside the stored chunk. */
+  start_offset?: number
+  end_offset?: number
 }

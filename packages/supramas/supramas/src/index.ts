@@ -467,7 +467,7 @@ export class SupraMasRuntime extends Service {
    * @returns stable verified provenance including the persisted evidence kind.
    */
   verifyEvidence(id: SupraMasRunIdBrand, paperId: string, evidence: EvidenceRef): EvidenceVerification {
-    return this.evidenceFor(id).verify(paperId, evidence)
+    return this.evidenceFor(id).resolve(paperId, evidence)
   }
 
   /**

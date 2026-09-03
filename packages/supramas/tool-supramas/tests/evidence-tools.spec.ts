@@ -109,7 +109,14 @@ describe('SupraMAS evidence tools', () => {
     if (verified.isError) throw new Error('expected evidence verification success')
     expect(verified.value).toMatchObject({
       status: 'success',
-      data: { verification: { verified: true, evidence_kind: 'abstract' } },
+      data: {
+        verification: {
+          verified: true,
+          evidence_kind: 'abstract',
+          canonical_evidence_text: 'improved in-field Jc',
+          match_kind: 'exact',
+        },
+      },
     })
   })
 

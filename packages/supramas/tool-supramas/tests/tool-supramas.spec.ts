@@ -342,6 +342,8 @@ describe('dsh-tool-supramas', () => {
     expect(JSON.stringify(builderRequest.prompt)).not.toContain('paper-unused')
     expect(JSON.stringify(builderRequest.prompt)).toContain('available_imported_papers')
     expect(builderRequest.persona).toContain('copy child_tuning_effect byte-for-byte')
+    expect(builderRequest.persona).toContain('verification.canonical_evidence_text')
+    expect(builderRequest.persona).toContain('at most twelve chunk reads and twelve evidence verifications')
     const reviewerRequest = start.mock.calls[1]?.[1]
     if (reviewerRequest === undefined) throw new Error('expected reviewer subagent request')
     expect(reviewerRequest).toMatchObject({
@@ -354,7 +356,7 @@ describe('dsh-tool-supramas', () => {
     expect(disposeReviewer).toHaveBeenCalledOnce()
   })
 
-  it('latches a failed atomic handoff and preserves the exact workflow revision', async () => {
+  it('allows one same-process retry, then latches a failed atomic handoff at the exact revision', async () => {
     const ctx = await setup(false)
     await ctx.plugin(ToolSupraMas, { mode: 'orchestrated', subagentProvider: 'attested' })
     const created = await ctx.supramas.create({
@@ -389,17 +391,21 @@ describe('dsh-tool-supramas', () => {
 
     const first = await call(ctx, 'supramas_stage1_builder_submit', args, fakeAgent())
     const second = await call(ctx, 'supramas_stage1_builder_submit', args, fakeAgent())
-    for (const result of [first, second]) {
+    const third = await call(ctx, 'supramas_stage1_builder_submit', args, fakeAgent())
+    for (const result of [first, second, third]) {
       expect(result.isError).toBe(false)
       if (result.isError) throw new Error('expected a controlled failure envelope')
       expect(result.value).toMatchObject({
         status: 'error',
-        next_actions: ['stop_current_session_and_resume_same_revision'],
         data: { run: { revision: before.run.revision } },
         error: { code: 'SUPRAMAS_SUBAGENT_HANDOFF_FAILED' },
       })
     }
-    expect(start).toHaveBeenCalledOnce()
+    if (first.isError || second.isError || third.isError) throw new Error('expected controlled failure envelopes')
+    expect(first.value).toMatchObject({ next_actions: ['retry_same_revision_once'] })
+    expect(second.value).toMatchObject({ next_actions: ['restart_process_and_resume_same_revision'] })
+    expect(third.value).toMatchObject({ next_actions: ['restart_process_and_resume_same_revision'] })
+    expect(start).toHaveBeenCalledTimes(2)
     expect(start.mock.calls[0]?.[1].toolFilter?.allow).toEqual([
       'web_search',
       'supramas_literature_search',
@@ -408,6 +414,64 @@ describe('dsh-tool-supramas', () => {
       'supramas_chunk_read',
       'supramas_evidence_verify',
     ])
+    expect(dispose).toHaveBeenCalledTimes(2)
+    expect(ctx.supramas.getStage1(ready.id)).toMatchObject({
+      run: { revision: before.run.revision },
+      workflow: { builder_attempts: [] },
+    })
+  })
+
+  it('classifies a builder deadline separately and preserves state for one safe retry', async () => {
+    const ctx = await setup(false)
+    await ctx.plugin(ToolSupraMas, {
+      mode: 'orchestrated',
+      subagentProvider: 'attested',
+      builderHandoffTimeoutMs: 1_000,
+    })
+    const created = await ctx.supramas.create({
+      jobId: 'timed-out-handoff',
+      inputTaskPath: 'runs/timed-out-handoff/input_task.yaml',
+      runDir: 'runs/timed-out-handoff',
+    })
+    const ready = await ctx.supramas.transition(created, { phase: 'task_ready' })
+    await call(ctx, 'supramas_stage1_start', {
+      run_id: ready.id,
+      revision: ready.revision,
+      research_topic: 'REBCO flux pinning',
+      max_depth: 0,
+      max_root_attempts: 1,
+      max_child_attempts_per_limitation: 1,
+    })
+    const before = ctx.supramas.getStage1(ready.id)
+    if (before === undefined) throw new Error('expected started workflow')
+    const dispose = vi.fn()
+    const start = vi.fn((_provider: string, request: SubagentStartRequest) => Promise.resolve({
+      id: 'builder-run-timeout',
+      result: new Promise<{ stopReason: 'aborted'; output: never[] }>((resolve) => {
+        request.signal.addEventListener('abort', () => {
+          resolve({ stopReason: 'aborted', output: [] })
+        }, { once: true })
+      }),
+      dispose,
+    }))
+    ctx.provide('subagents', { start } as never)
+
+    const result = await call(ctx, 'supramas_stage1_builder_submit', {
+      run_id: ready.id,
+      revision: before.run.revision,
+    }, fakeAgent())
+
+    expect(result.isError).toBe(false)
+    if (result.isError) throw new Error('expected a controlled timeout envelope')
+    expect(result.value).toMatchObject({
+      status: 'error',
+      next_actions: ['retry_same_revision_once'],
+      data: { run: { revision: before.run.revision } },
+      error: {
+        code: 'SUPRAMAS_SUBAGENT_HANDOFF_TIMEOUT',
+      },
+    })
+    expect(JSON.stringify(result.value)).toContain('timed out after 1000 ms')
     expect(dispose).toHaveBeenCalledOnce()
     expect(ctx.supramas.getStage1(ready.id)).toMatchObject({
       run: { revision: before.run.revision },

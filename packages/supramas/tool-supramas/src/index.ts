@@ -39,15 +39,24 @@ export interface Config {
   mode?: 'orchestrated' | 'direct'
   /** Registered one-shot subagent provider used by orchestrated mode. */
   subagentProvider?: string
-  /** Maximum wall-clock time for one atomic builder or reviewer handoff. */
+  /** Legacy shared wall-clock limit for builder and reviewer handoffs. */
   handoffTimeoutMs?: number
+  /** Maximum wall-clock time for one discovery-heavy builder handoff. */
+  builderHandoffTimeoutMs?: number
+  /** Maximum wall-clock time for one bounded reviewer handoff. */
+  reviewerHandoffTimeoutMs?: number
 }
 
 export const Config: z<Config> = z.object({
   mode: z.union(['orchestrated', 'direct'] as const).default('orchestrated'),
   subagentProvider: z.string().default('spawn'),
-  handoffTimeoutMs: z.number().step(1).min(1_000).max(3_600_000).default(600_000),
+  handoffTimeoutMs: z.number().step(1).min(1_000).max(3_600_000),
+  builderHandoffTimeoutMs: z.number().step(1).min(1_000).max(3_600_000),
+  reviewerHandoffTimeoutMs: z.number().step(1).min(1_000).max(3_600_000),
 })
+
+const DEFAULT_BUILDER_HANDOFF_TIMEOUT_MS = 3_600_000
+const DEFAULT_REVIEWER_HANDOFF_TIMEOUT_MS = 600_000
 
 interface ToolFailure {
   code: string
@@ -119,6 +128,10 @@ const outputSchema = {
             chunk_id: { type: 'string', required: true },
             local_path: { type: 'string', required: true },
             evidence_kind: { type: 'string', required: true, enum: ['abstract', 'full_text'] },
+            canonical_evidence_text: { type: 'string' },
+            match_kind: { type: 'string', enum: ['exact', 'normalized'] },
+            start_offset: { type: 'integer' },
+            end_offset: { type: 'integer' },
           },
         },
         workflow: { type: 'object', additionalProperties: true },
@@ -447,7 +460,10 @@ abstracts are discovery metadata and must never be cited. Every evidence_text mu
 of its cited full_text chunk and must contain complete supporting sentences rather than labels or sentence
 fragments. It must cover every number, comparison, material/process qualifier, and mechanism asserted by
 the record. Before returning, call supramas_evidence_verify for every proposed evidence quote and correct
-any mismatch against supramas_chunk_read; never return an unverified quote. On revision,
+any mismatch against supramas_chunk_read; never return an unverified quote. Always copy
+verification.canonical_evidence_text into the record, especially when match_kind is normalized. Attempt exact-character repair
+at most twice per quote, use at most twelve chunk reads and twelve evidence verifications for one handoff,
+and return a null paper_node with a precise reason instead of continuing a repeated verification loop. On revision,
 keep the same paper and address every reviewer condition. Never review, accept, submit workflow state, or
 assemble a tree. Finish promptly with exactly one structured result matching the required schema; use null
 paper_node when no supported full-text candidate exists and null edge for a root or unsupported child bridge.
@@ -473,6 +489,33 @@ interface StructuredDelegation<T> {
   value: T
 }
 
+type HandoffAbortKind = 'caller_aborted' | 'timeout' | 'subagent_aborted'
+
+class HandoffAbortError extends Error {
+  constructor(readonly kind: HandoffAbortKind, message: string) {
+    super(message)
+    this.name = 'HandoffAbortError'
+  }
+}
+
+function handoffAbortError(
+  label: string,
+  callerSignal: AbortSignal,
+  timeoutSignal: AbortSignal,
+  timeoutMs: number,
+): HandoffAbortError {
+  if (callerSignal.aborted) {
+    return new HandoffAbortError('caller_aborted', `SupraMAS ${label} handoff was cancelled by its caller`)
+  }
+  if (timeoutSignal.aborted) {
+    return new HandoffAbortError(
+      'timeout',
+      `SupraMAS ${label} handoff timed out after ${timeoutMs} ms`,
+    )
+  }
+  return new HandoffAbortError('subagent_aborted', `SupraMAS ${label} subagent aborted independently`)
+}
+
 async function delegateStructured<T>(
   ctx: Context,
   exec: ToolRunContext,
@@ -493,33 +536,45 @@ async function delegateStructured<T>(
   if (subagents === undefined) {
     throw new Error('orchestrated SupraMAS handoff requires the subagents service')
   }
-  const run = await subagents.start(options.provider, {
-    label: options.label,
-    prompt: [{ type: 'text', text: options.prompt }],
-    parent: exec.agent,
-    signal: AbortSignal.any([exec.signal, AbortSignal.timeout(options.timeoutMs)]),
-    outputSchema: valueSchemaSpecToJsonSchema(options.schema) as StructuredSchema,
-    maxDepth: 1,
-    persona: options.persona,
-    toolFilter: options.toolFilter,
-  })
+  const timeoutSignal = AbortSignal.timeout(options.timeoutMs)
+  const signal = AbortSignal.any([exec.signal, timeoutSignal])
   try {
-    const result = await run.result
-    if (result.stopReason !== 'completed') {
-      throw new Error(
-        `SupraMAS ${options.label} subagent ended with ${result.stopReason}`
-        + (result.diagnostic === undefined ? '' : `: ${result.diagnostic}`),
-      )
+    const run = await subagents.start(options.provider, {
+      label: options.label,
+      prompt: [{ type: 'text', text: options.prompt }],
+      parent: exec.agent,
+      signal,
+      outputSchema: valueSchemaSpecToJsonSchema(options.schema) as StructuredSchema,
+      maxDepth: 1,
+      persona: options.persona,
+      toolFilter: options.toolFilter,
+    })
+    try {
+      const result = await run.result
+      if (result.stopReason === 'aborted') {
+        throw handoffAbortError(options.label, exec.signal, timeoutSignal, options.timeoutMs)
+      }
+      if (result.stopReason !== 'completed') {
+        throw new Error(
+          `SupraMAS ${options.label} subagent ended with ${result.stopReason}`
+          + (result.diagnostic === undefined ? '' : `: ${result.diagnostic}`),
+        )
+      }
+      if (result.structured === undefined) {
+        throw new Error(`SupraMAS ${options.label} subagent returned no structured handoff`)
+      }
+      return {
+        runId: String(run.id),
+        value: structuredClone(result.structured) as T,
+      }
+    } finally {
+      await run.dispose()
     }
-    if (result.structured === undefined) {
-      throw new Error(`SupraMAS ${options.label} subagent returned no structured handoff`)
+  } catch (error) {
+    if (!(error instanceof HandoffAbortError) && signal.aborted) {
+      throw handoffAbortError(options.label, exec.signal, timeoutSignal, options.timeoutMs)
     }
-    return {
-      runId: String(run.id),
-      value: structuredClone(result.structured) as T,
-    }
-  } finally {
-    await run.dispose()
+    throw error
   }
 }
 
@@ -700,12 +755,20 @@ function handoffFailureEnvelope(
   state: Stage1RunState,
   kind: 'builder' | 'reviewer',
   error: unknown,
+  retryInProcess: boolean,
 ): ToolEnvelope {
   const detail = (error instanceof Error ? error.message : String(error)).replaceAll(/\s+/g, ' ').slice(0, 1_000)
+  const code = error instanceof HandoffAbortError
+    ? {
+      timeout: 'SUPRAMAS_SUBAGENT_HANDOFF_TIMEOUT',
+      caller_aborted: 'SUPRAMAS_SUBAGENT_HANDOFF_CALLER_ABORTED',
+      subagent_aborted: 'SUPRAMAS_SUBAGENT_HANDOFF_ABORTED',
+    }[error.kind]
+    : 'SUPRAMAS_SUBAGENT_HANDOFF_FAILED'
   return {
     status: 'error',
     summary: `SupraMAS ${kind} handoff failed before state mutation: ${detail}`,
-    next_actions: ['stop_current_session_and_resume_same_revision'],
+    next_actions: [retryInProcess ? 'retry_same_revision_once' : 'restart_process_and_resume_same_revision'],
     artifacts: [state.run.runDir],
     data: {
       run: state.run,
@@ -713,17 +776,42 @@ function handoffFailureEnvelope(
       next_action: jsonObject(state.nextAction),
     },
     error: {
-      code: 'SUPRAMAS_SUBAGENT_HANDOFF_FAILED',
+      code,
       root_cause_hint: detail,
-      safe_retry: `Resume later with run_id ${state.run.id} at revision ${state.run.revision}; retry once in a new process.`,
-      stop_condition: `Do not call the ${kind} submit tool again in this process for the same revision.`,
+      safe_retry: retryInProcess
+        ? `Retry ${kind} once in this process with run_id ${state.run.id} at revision ${state.run.revision}.`
+        : `Restart the DSH process, then resume run_id ${state.run.id} at revision ${state.run.revision}.`,
+      stop_condition: retryInProcess
+        ? `Do not start more than one retry for this ${kind} revision.`
+        : `Do not call the ${kind} submit tool again in this process for the same revision.`,
+    },
+  }
+}
+
+function handoffInProgressEnvelope(state: Stage1RunState, kind: 'builder' | 'reviewer'): ToolEnvelope {
+  return {
+    status: 'error',
+    summary: `A SupraMAS ${kind} handoff is already active for revision ${state.run.revision}.`,
+    next_actions: ['wait_for_active_handoff'],
+    artifacts: [state.run.runDir],
+    data: {
+      run: state.run,
+      workflow: jsonObject(state.workflow),
+      next_action: jsonObject(state.nextAction),
+    },
+    error: {
+      code: 'SUPRAMAS_SUBAGENT_HANDOFF_IN_PROGRESS',
+      root_cause_hint: 'A duplicate handoff was rejected before a second subagent could start.',
+      safe_retry: 'Wait for the active handoff result, then read supramas_stage1_get before taking another action.',
+      stop_condition: `Do not start another ${kind} handoff for this revision while one is active.`,
     },
   }
 }
 
 /** Register narrow run controls and provenance-bound Stage 1 evidence tools. */
 export function apply(ctx: Context, config: Config): void {
-  const failedHandoffs = new Set<string>()
+  const failedHandoffs = new Map<string, number>()
+  const activeHandoffs = new Set<string>()
   ctx.tools.register(defineTool({
     name: 'supramas_run_create',
     description: 'Create one deterministic, revisioned SupraMAS material-science run.',
@@ -1016,9 +1104,19 @@ export function apply(ctx: Context, config: Config): void {
             )
           }
           const handoffKey = `builder:${runId}:${args.revision}`
-          if (failedHandoffs.has(handoffKey)) {
-            return handoffFailureEnvelope(current, 'builder', 'a prior builder handoff already failed in this process')
+          const priorFailures = failedHandoffs.get(handoffKey) ?? 0
+          if (priorFailures >= 2) {
+            return handoffFailureEnvelope(
+              current,
+              'builder',
+              'two prior builder handoffs already failed in this process',
+              false,
+            )
           }
+          if (activeHandoffs.has(handoffKey)) {
+            return handoffInProgressEnvelope(current, 'builder')
+          }
+          activeHandoffs.add(handoffKey)
           const availablePapers = availableBuilderPapers(current, ctx.supramas.listPapers(runId))
           const allowDiscovery = availablePapers.length === 0 && current.nextAction.kind !== 'revise_candidate'
           try {
@@ -1028,7 +1126,9 @@ export function apply(ctx: Context, config: Config): void {
               prompt: handoffPrompt('builder', current, availablePapers),
               persona: BUILDER_PERSONA,
               schema: builderHandoffSchema,
-              timeoutMs: config.handoffTimeoutMs ?? 600_000,
+              timeoutMs: config.builderHandoffTimeoutMs
+                ?? config.handoffTimeoutMs
+                ?? DEFAULT_BUILDER_HANDOFF_TIMEOUT_MS,
               toolFilter: {
                 allow: [
                   ...(allowDiscovery ? ['web_search', 'supramas_literature_search', 'supramas_paper_import'] : []),
@@ -1042,10 +1142,14 @@ export function apply(ctx: Context, config: Config): void {
               { id: runId, revision: args.revision },
               { ...handoff.value, builder_run_id: handoff.runId },
             )
+            failedHandoffs.delete(handoffKey)
             return stage1Envelope(state, `Recorded attested builder handoff for ${state.run.jobId}.`)
           } catch (error) {
-            failedHandoffs.add(handoffKey)
-            return handoffFailureEnvelope(current, 'builder', error)
+            const failures = priorFailures + 1
+            failedHandoffs.set(handoffKey, failures)
+            return handoffFailureEnvelope(current, 'builder', error, failures < 2)
+          } finally {
+            activeHandoffs.delete(handoffKey)
           }
         })
       },
@@ -1073,9 +1177,19 @@ export function apply(ctx: Context, config: Config): void {
             )
           }
           const handoffKey = `reviewer:${runId}:${args.revision}`
-          if (failedHandoffs.has(handoffKey)) {
-            return handoffFailureEnvelope(current, 'reviewer', 'a prior reviewer handoff already failed in this process')
+          const priorFailures = failedHandoffs.get(handoffKey) ?? 0
+          if (priorFailures >= 2) {
+            return handoffFailureEnvelope(
+              current,
+              'reviewer',
+              'two prior reviewer handoffs already failed in this process',
+              false,
+            )
           }
+          if (activeHandoffs.has(handoffKey)) {
+            return handoffInProgressEnvelope(current, 'reviewer')
+          }
+          activeHandoffs.add(handoffKey)
           try {
             const handoff = await delegateStructured<Stage1ReviewSubmission>(ctx, exec, {
               provider: config.subagentProvider ?? 'spawn',
@@ -1083,7 +1197,9 @@ export function apply(ctx: Context, config: Config): void {
               prompt: handoffPrompt('reviewer', current, reviewerPapers(current, ctx.supramas.listPapers(runId))),
               persona: REVIEWER_PERSONA,
               schema: reviewerHandoffSchema,
-              timeoutMs: config.handoffTimeoutMs ?? 600_000,
+              timeoutMs: config.reviewerHandoffTimeoutMs
+                ?? config.handoffTimeoutMs
+                ?? DEFAULT_REVIEWER_HANDOFF_TIMEOUT_MS,
               toolFilter: {
                 allow: ['supramas_chunk_list', 'supramas_chunk_read', 'supramas_evidence_verify'],
               },
@@ -1093,10 +1209,14 @@ export function apply(ctx: Context, config: Config): void {
               { id: runId, revision: args.revision },
               { ...reviewed, reviewer_run_id: handoff.runId },
             )
+            failedHandoffs.delete(handoffKey)
             return stage1Envelope(state, `Recorded attested reviewer handoff for ${state.run.jobId}.`)
           } catch (error) {
-            failedHandoffs.add(handoffKey)
-            return handoffFailureEnvelope(current, 'reviewer', error)
+            const failures = priorFailures + 1
+            failedHandoffs.set(handoffKey, failures)
+            return handoffFailureEnvelope(current, 'reviewer', error, failures < 2)
+          } finally {
+            activeHandoffs.delete(handoffKey)
           }
         })
       },
@@ -1153,7 +1273,7 @@ export function apply(ctx: Context, config: Config): void {
 
   ctx.tools.register(defineTool({
     name: 'supramas_evidence_verify',
-    description: 'Verify that one literal evidence quote and page resolve to a stored local paper chunk.',
+    description: 'Resolve one evidence selector to a canonical literal chunk quote and verify its page.',
     parameters: {
       run_id: { type: 'string', required: true, description: 'Owning deterministic SupraMAS run id.' },
       paper_id: { type: 'string', required: true, description: 'Expected owning paper identity.' },

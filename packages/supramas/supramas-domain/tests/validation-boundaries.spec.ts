@@ -347,12 +347,30 @@ describe('EvidenceCatalog boundaries', () => {
     expectCode(() => evidence.verify('p1', { chunk_id: 'c1', evidence_text: 'absent' }), 'SUPRAMAS_EVIDENCE_MISMATCH')
     expect(evidence.verify('p1', { chunk_id: 'c1', evidence_text: ' literal quote ' }).verified).toBe(true)
     expect(evidence.verify('p1', { chunk_id: 'c2', page: null, evidence_text: 'second' }).verified).toBe(true)
+    evidence.addChunk('p1', {
+      chunk_id: 'c3',
+      text: 'BHO nanorods of 5–7 nm are\nobtained and J\nc improves.',
+    })
+    expectCode(() => evidence.verify('p1', {
+      chunk_id: 'c3',
+      evidence_text: 'BHO nanorods of 5-7 nm are\\nobtained and Jc improves.',
+    }), 'SUPRAMAS_EVIDENCE_MISMATCH')
+    expect(evidence.resolve('p1', {
+      chunk_id: 'c3',
+      evidence_text: 'BHO nanorods of 5-7 nm are\\nobtained and Jc improves.',
+    })).toMatchObject({
+      verified: true,
+      match_kind: 'normalized',
+      canonical_evidence_text: 'BHO nanorods of 5–7 nm are\nobtained and J\nc improves.',
+      start_offset: 0,
+      end_offset: 53,
+    })
 
     const internals = evidence as unknown as {
       papers: Map<string, { chunks: unknown[] }>
       chunkOwners: Map<string, string>
     }
-    internals.papers.get('p1')?.chunks.pop()
+    internals.papers.get('p1')?.chunks.splice(1, 1)
     expectCode(() => evidence.verify('p1', { chunk_id: 'c2', evidence_text: 'second' }), 'SUPRAMAS_EVIDENCE_MISSING')
   })
 })

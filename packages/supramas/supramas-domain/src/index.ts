@@ -272,10 +272,57 @@ function clone<T>(value: T): T {
   return structuredClone(value)
 }
 
+function compactEvidence(value: string): { text: string; offsets: number[] } {
+  let text = ''
+  const offsets: number[] = []
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index] ?? ''
+    const next = value[index + 1]
+    if (char === '\\' && (next === 'n' || next === 'r')) {
+      index += 1
+      continue
+    }
+    if (/\s/u.test(char)) continue
+    text += /[-‐‑‒–—−]/u.test(char) ? '-' : char
+    offsets.push(index)
+  }
+  return { text, offsets }
+}
+
+function flexibleEvidenceMatch(text: string, quote: string): { value: string; index: number } | undefined {
+  if (quote.length === 0 || quote.length > 4_000) return undefined
+  const needle = compactEvidence(quote).text
+  if (needle.length === 0) return undefined
+  const haystack = compactEvidence(text)
+  const compactOffset = haystack.text.indexOf(needle)
+  if (compactOffset < 0) return undefined
+  const start = haystack.offsets[compactOffset]
+  const last = haystack.offsets[compactOffset + needle.length - 1]
+  if (start === undefined || last === undefined) return undefined
+  return { value: text.slice(start, last + 1), index: start }
+}
+
 /** Process-local catalog proving that every evidence id resolves to a run-local paper artifact. */
 export class EvidenceCatalog {
   private readonly papers = new Map<string, PaperArtifact>()
   private readonly chunkOwners = new Map<string, string>()
+
+  private evidenceChunk(paperId: string, evidence: EvidenceRef): {
+    artifact: PaperArtifact
+    chunk: EvidenceChunk
+  } {
+    const artifact = this.papers.get(paperId)
+    if (artifact === undefined) fail(`paper ${paperId} has no local artifact`, 'SUPRAMAS_EVIDENCE_MISSING')
+    const owner = this.chunkOwners.get(evidence.chunk_id)
+    const chunk = artifact.chunks.find(candidate => candidate.chunk_id === evidence.chunk_id)
+    if (owner !== paperId || chunk === undefined) {
+      fail(`chunk ${evidence.chunk_id} does not resolve under paper ${paperId}`, 'SUPRAMAS_EVIDENCE_MISSING')
+    }
+    if (evidence.page !== undefined && evidence.page !== null && chunk.page !== evidence.page) {
+      fail(`chunk ${evidence.chunk_id} does not match evidence page ${evidence.page}`, 'SUPRAMAS_EVIDENCE_MISMATCH')
+    }
+    return { artifact, chunk }
+  }
 
   /** @param jobId - Job whose canonical `runs/<jobId>/papers` directory owns every artifact. */
   constructor(readonly jobId: string) {
@@ -362,17 +409,10 @@ export class EvidenceCatalog {
    * @returns stable verified provenance.
    */
   verify(paperId: string, evidence: EvidenceRef): EvidenceVerification {
-    const artifact = this.papers.get(paperId)
-    if (artifact === undefined) fail(`paper ${paperId} has no local artifact`, 'SUPRAMAS_EVIDENCE_MISSING')
-    const owner = this.chunkOwners.get(evidence.chunk_id)
-    const chunk = artifact.chunks.find(candidate => candidate.chunk_id === evidence.chunk_id)
-    if (owner !== paperId || chunk === undefined) {
-      fail(`chunk ${evidence.chunk_id} does not resolve under paper ${paperId}`, 'SUPRAMAS_EVIDENCE_MISSING')
-    }
-    if (evidence.page !== undefined && evidence.page !== null && chunk.page !== evidence.page) {
-      fail(`chunk ${evidence.chunk_id} does not match evidence page ${evidence.page}`, 'SUPRAMAS_EVIDENCE_MISMATCH')
-    }
-    if (!chunk.text.includes(evidence.evidence_text.trim())) {
+    const { artifact, chunk } = this.evidenceChunk(paperId, evidence)
+    const submitted = evidence.evidence_text.trim()
+    const exactOffset = chunk.text.indexOf(submitted)
+    if (exactOffset < 0) {
       fail(`evidence quote is not present in chunk ${evidence.chunk_id}`, 'SUPRAMAS_EVIDENCE_MISMATCH')
     }
     return {
@@ -381,6 +421,34 @@ export class EvidenceCatalog {
       chunk_id: evidence.chunk_id,
       local_path: artifact.local_path,
       evidence_kind: chunk.evidence_kind,
+      canonical_evidence_text: submitted,
+      match_kind: 'exact',
+      start_offset: exactOffset,
+      end_offset: exactOffset + submitted.length,
+    }
+  }
+
+  /** Resolve a whitespace-normalized selector to the exact chunk text without weakening final validation. */
+  resolve(paperId: string, evidence: EvidenceRef): EvidenceVerification {
+    const { artifact, chunk } = this.evidenceChunk(paperId, evidence)
+    const submitted = evidence.evidence_text.trim()
+    const exactOffset = chunk.text.indexOf(submitted)
+    const repaired = exactOffset < 0 ? flexibleEvidenceMatch(chunk.text, submitted) : undefined
+    if (exactOffset < 0 && repaired === undefined) {
+      fail(`evidence quote is not present in chunk ${evidence.chunk_id}`, 'SUPRAMAS_EVIDENCE_MISMATCH')
+    }
+    const canonicalEvidenceText = exactOffset >= 0 ? submitted : repaired?.value ?? submitted
+    const startOffset = exactOffset >= 0 ? exactOffset : repaired?.index ?? 0
+    return {
+      verified: true,
+      paper_id: paperId,
+      chunk_id: evidence.chunk_id,
+      local_path: artifact.local_path,
+      evidence_kind: chunk.evidence_kind,
+      canonical_evidence_text: canonicalEvidenceText,
+      match_kind: exactOffset >= 0 ? 'exact' : 'normalized',
+      start_offset: startOffset,
+      end_offset: startOffset + canonicalEvidenceText.length,
     }
   }
 }
