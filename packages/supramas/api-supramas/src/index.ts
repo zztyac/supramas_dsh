@@ -129,6 +129,12 @@ function outputName(value: unknown): SupraMasOutputNameV1 {
   return value as SupraMasOutputNameV1
 }
 
+/**
+ * Stage 1 policy exclusions that must survive any caller-provided exclude list.
+ * `abstract-only evidence` activates the durable full-text evidence policy in the domain.
+ */
+const POLICY_EXCLUSIONS: readonly string[] = ['abstract-only evidence', 'Stage 2 idea generation']
+
 function normalizeCreate(request: SupraMasCreateStage1RequestV1, generatedJobId: string): NormalizedCreateRequest {
   const jobId = request.jobId === undefined ? generatedJobId : nonempty(request.jobId, 'jobId')
   if (!JOB_ID.test(jobId)) {
@@ -143,7 +149,7 @@ function normalizeCreate(request: SupraMasCreateStage1RequestV1, generatedJobId:
       ? {}
       : { evidencePolicy: nonempty(request.evidencePolicy, 'evidencePolicy') }),
     ...(request.include === undefined ? {} : { include: stringList(request.include, 'include') }),
-    ...(request.exclude === undefined ? {} : { exclude: stringList(request.exclude, 'exclude') }),
+    exclude: [...new Set([...POLICY_EXCLUSIONS, ...stringList(request.exclude, 'exclude')])],
     maxDepth: integer(request.maxDepth, 3, 'maxDepth', 0),
     maxRootAttempts: integer(request.maxRootAttempts, 3, 'maxRootAttempts', 1),
     maxChildAttemptsPerLimitation: integer(

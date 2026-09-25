@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
@@ -75,20 +75,30 @@ const request = {
 
 const evidenceText = 'BZO additions improve in-field Jc, but only one loading was measured.'
 
-async function completedRun(controller: SupraMasController, ctx: Context) {
+async function completedRun(controller: SupraMasController, ctx: Context, artifactRoot: string) {
   const created = await controller.createStage1({
     ...request,
     jobId: 'ui-completed-demo',
     maxDepth: 0,
   })
+  const rawDir = join(artifactRoot, 'runs/ui-completed-demo/papers/raw')
+  await mkdir(rawDir, { recursive: true })
+  await writeFile(join(rawDir, 'paper-1.pdf'), '%PDF-1.7 fixture')
   await ctx.supramas.importPaper(SupraMasRunId(created.run.id), {
     metadata: {
       paper_id: 'paper-1',
       paper_title: 'BZO pinning paper',
       local_path: 'runs/ui-completed-demo/papers/paper-1.json',
       source_type: 'experimental',
+      full_text_source: {
+        local_path: 'runs/ui-completed-demo/papers/raw/paper-1.pdf',
+        media_type: 'application/pdf',
+        sha256: 'a'.repeat(64),
+        byte_length: 1_024,
+        page_count: 7,
+      },
     },
-    chunks: [{ chunk_id: 'paper-1-c1', page: 7, text: evidenceText, evidence_kind: 'abstract' }],
+    chunks: [{ chunk_id: 'paper-1-c1', page: 7, text: evidenceText, evidence_kind: 'full_text' }],
   })
   const built = await ctx.supramas.submitStage1Builder({
     id: SupraMasRunId(created.run.id),
@@ -179,7 +189,7 @@ describe('SupraMAS Remote contract', () => {
 
   it('projects the accepted strategy tree and browser-safe paper chunk metadata', async () => {
     const { controller, ctx, artifactRoot } = await harness()
-    const completed = await completedRun(controller, ctx)
+    const completed = await completedRun(controller, ctx, artifactRoot)
 
     const tree = await controller.tree(completed.run.id)
     expect(tree).toMatchObject({
@@ -224,8 +234,8 @@ describe('SupraMAS Remote contract', () => {
   })
 
   it('returns one bounded evidence slice and one canonical artifact payload', async () => {
-    const { controller, ctx } = await harness()
-    const completed = await completedRun(controller, ctx)
+    const { controller, ctx, artifactRoot } = await harness()
+    const completed = await completedRun(controller, ctx, artifactRoot)
 
     await expect(controller.evidence(completed.run.id, 'paper-1', 'paper-1-c1', 4, 12)).resolves.toEqual({
       apiVersion: 1,
@@ -251,9 +261,9 @@ describe('SupraMAS Remote contract', () => {
   })
 
   it('classifies invalid evidence and artifact reads without leaking paths', async () => {
-    const { controller, ctx } = await harness()
+    const { controller, ctx, artifactRoot } = await harness()
     const active = await controller.createStage1({ ...request, jobId: 'ui-read-errors' })
-    const completed = await completedRun(controller, ctx)
+    const completed = await completedRun(controller, ctx, artifactRoot)
 
     await expect(controller.paper(completed.run.id, 'missing')).rejects.toMatchObject({
       failure: { code: 'supramas-paper-not-found', details: { runId: completed.run.id, paperId: 'missing' } },
@@ -413,6 +423,21 @@ describe('SupraMAS Remote contract', () => {
     })
     await expect(controller.cancel(generated.run.id, 0)).rejects.toMatchObject({
       failure: { code: 'bad-request' },
+    })
+  })
+
+  it('merges policy exclusions with caller-provided scope filters', async () => {
+    const { controller, ctx } = await harness()
+    const created = await controller.createStage1({
+      researchTopic: 'REBCO isotropic pinning',
+      include: ['BHO nanorods', 'coated conductors'],
+      exclude: ['computational-only studies'],
+      maxDepth: 0,
+    })
+    const state = ctx.supramas.getStage1(SupraMasRunId(created.run.id))
+    expect(state?.workflow.config).toMatchObject({
+      include: ['BHO nanorods', 'coated conductors'],
+      exclude: ['abstract-only evidence', 'Stage 2 idea generation', 'computational-only studies'],
     })
   })
 
