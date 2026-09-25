@@ -99,7 +99,7 @@ bundle 发布契约测试会验证声明的打包入口文件、每个已挂载 
 
 ## 实现说明
 
-`cordis.patch.yml` 按依赖顺序插入运行时、工作区内的产物写入器、文献注册表、OpenAlex provider、有界 HTTP 获取、受管 `pypdf` 解析器、论文导入协调器、Typert API、模型工具和浏览器 UI。运行时打开带版本的 `supramas` 存储领域；产物写入器使用进程工作区作为根目录；静态 bundle 本身仍不提供服务。
+`cordis.patch.yml` 按依赖顺序插入运行时、工作区内的产物写入器、文献注册表（联邦 OpenAlex 与 arXiv 双源）、有界 HTTP 获取、受管 `pypdf` 解析器、论文导入协调器、Typert API、模型工具和浏览器 UI。运行时打开带版本的 `supramas` 存储领域；产物写入器使用进程工作区作为根目录；静态 bundle 本身仍不提供服务。
 
 <a id="model-experience"></a>
 
@@ -123,7 +123,7 @@ bundle 没有直接成本；可见工具 schema 和所选 preset 文本产生 to
 
 ## 已知限制与后续工作
 
-- 学术检索受 OpenAlex 可用性和限流约束。
+- 学术检索联邦 OpenAlex 与 arXiv 双源；各自受自身可用性与限流约束，单个来源失败时只要仍有来源应答即跳过该来源。
 - 全文抽取需要 `pypdf`；图像型 PDF 尚无 OCR。
 - 活动任务的浏览器进度使用有界轮询，而不是实时服务端事件流。
 - 在 npm 包所有权从上游 scope 迁出前，本 fork 仍通过源码交付。

@@ -495,6 +495,8 @@
       "@deepseek-ai/dsh-supramas-domain/invariant": ["./packages/supramas/supramas-domain/src/invariant.ts"],
       "@deepseek-ai/dsh-supramas-literature": ["./packages/supramas/supramas-literature/src"],
       "@deepseek-ai/dsh-supramas-literature/invariant": ["./packages/supramas/supramas-literature/src/invariant.ts"],
+      "@deepseek-ai/dsh-supramas-literature-arxiv": ["./packages/supramas/supramas-literature-arxiv/src"],
+      "@deepseek-ai/dsh-supramas-literature-arxiv/invariant": ["./packages/supramas/supramas-literature-arxiv/src/invariant.ts"],
       "@deepseek-ai/dsh-supramas-literature-openalex": ["./packages/supramas/supramas-literature-openalex/src"],
       "@deepseek-ai/dsh-supramas-literature-openalex/invariant": ["./packages/supramas/supramas-literature-openalex/src/invariant.ts"],
       "@deepseek-ai/dsh-supramas-paper-http": ["./packages/supramas/supramas-paper-http/src"],

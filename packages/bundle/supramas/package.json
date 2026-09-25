@@ -27,6 +27,7 @@
     "@deepseek-ai/dsh-supramas": "workspace:^",
     "@deepseek-ai/dsh-supramas-artifacts": "workspace:^",
     "@deepseek-ai/dsh-supramas-literature": "workspace:^",
+    "@deepseek-ai/dsh-supramas-literature-arxiv": "workspace:^",
     "@deepseek-ai/dsh-supramas-literature-openalex": "workspace:^",
     "@deepseek-ai/dsh-supramas-paper-http": "workspace:^",
     "@deepseek-ai/dsh-supramas-paper-ingest": "workspace:^",

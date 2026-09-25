@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-This static profile patch adds the durable SupraMAS capability, compatibility-file writer, scholarly discovery and PDF-ingestion providers, versioned browser API, eighteen-tool model consumer, and live non-technical research workspace to a DSH profile in dependency order. It changes no agent-loop behavior and owns no runtime state itself.
+This static profile patch adds the durable SupraMAS capability, compatibility-file writer, multi-source scholarly discovery (OpenAlex and arXiv) and PDF-ingestion providers, versioned browser API, eighteen-tool model consumer, and live non-technical research workspace to a DSH profile in dependency order. It changes no agent-loop behavior and owns no runtime state itself.
 
 ## Table of Contents
 
@@ -89,7 +89,7 @@ The bundle release-contract test verifies that the packed entry files are declar
 
 ## Understand the implementation
 
-`cordis.patch.yml` inserts the runtime, workspace-confined artifact writer, literature registry, OpenAlex provider, bounded HTTP acquisition, managed `pypdf` parser, paper-ingestion coordinator, Typert API, model tools, and browser UI in dependency order. The runtime opens the versioned `supramas` storage domain; the artifact writer uses the process workspace as its root; the static bundle itself still owns no service.
+`cordis.patch.yml` inserts the runtime, workspace-confined artifact writer, literature registry with federated OpenAlex and arXiv providers, bounded HTTP acquisition, managed `pypdf` parser, paper-ingestion coordinator, Typert API, model tools, and browser UI in dependency order. The runtime opens the versioned `supramas` storage domain; the artifact writer uses the process workspace as its root; the static bundle itself still owns no service.
 
 ## Model Experience
 
@@ -109,7 +109,7 @@ Changing inserted rows or role-visible tools changes the composed model surface 
 
 ## Known Limitations and Deferred Work
 
-- OpenAlex availability and rate limits apply to scholarly discovery.
+- Scholarly discovery federates OpenAlex and arXiv; each source applies its own availability and rate limits, and a failing source is skipped while another still answers.
 - Full-text extraction requires `pypdf`; image-only PDFs are not OCR'd.
 - Active browser progress uses bounded polling rather than a live server event stream.
 - The fork is source-delivered until package ownership moves from the upstream npm scope.
