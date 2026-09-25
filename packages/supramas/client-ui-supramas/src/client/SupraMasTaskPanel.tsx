@@ -80,6 +80,23 @@ function nextKey(view: SupraMasRunViewV1): SupraMasKey | undefined {
   return view.stage1 === undefined ? undefined : `next.${view.stage1.nextAction.kind}`
 }
 
+function formatTimestamp(ms: number): string {
+  return new Date(ms).toLocaleString()
+}
+
+function taskMetaLine(t: SupraMasTaskPanelProps['t'], task: SupraMasRunViewV1): string {
+  return t('task.meta', {
+    jobId: task.run.jobId,
+    createdAt: formatTimestamp(task.run.createdAt),
+    updatedAt: formatTimestamp(task.run.updatedAt),
+  })
+}
+
+/** Newest task first so the latest run is always the top card. */
+function newestFirst(tasks: readonly SupraMasRunViewV1[]): SupraMasRunViewV1[] {
+  return [...tasks].sort((left, right) => right.run.createdAt - left.run.createdAt)
+}
+
 function replaceTask(
   tasks: readonly SupraMasRunViewV1[],
   task: SupraMasRunViewV1,
@@ -101,7 +118,10 @@ export function SupraMasTaskPanel({ wide, api, t }: SupraMasTaskPanelProps) {
   const [topic, setTopic] = useState('')
   const [materials, setMaterials] = useState('')
   const [properties, setProperties] = useState('')
+  const [include, setInclude] = useState('')
+  const [exclude, setExclude] = useState('')
   const [depth, setDepth] = useState(2)
+  const [childCap, setChildCap] = useState<number | null>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const closeRef = useRef<HTMLButtonElement>(null)
 
@@ -170,13 +190,19 @@ export function SupraMasTaskPanel({ wide, api, t }: SupraMasTaskPanelProps) {
         researchTopic,
         materialScope: entries(materials),
         targetProperty: entries(properties),
+        include: entries(include),
+        exclude: entries(exclude),
         maxDepth: depth,
+        targetChildNodes: childCap,
       })
       setTasks(current => replaceTask(current, result.view))
       setNotice(result.warning ?? (result.queued ? t('notice.queued') : t('notice.noSession')))
       setTopic('')
       setMaterials('')
       setProperties('')
+      setInclude('')
+      setExclude('')
+      setChildCap(null)
     })
   }
 
@@ -273,12 +299,44 @@ export function SupraMasTaskPanel({ wide, api, t }: SupraMasTaskPanelProps) {
                       />
                     </label>
                   </div>
+                  <div className={css.formGrid}>
+                    <label>
+                      <span>{t('form.include')}</span>
+                      <input
+                        value={include}
+                        placeholder={t('form.includePlaceholder')}
+                        onChange={(event) => { setInclude(event.target.value) }}
+                      />
+                    </label>
+                    <label>
+                      <span>{t('form.exclude')}</span>
+                      <input
+                        value={exclude}
+                        placeholder={t('form.excludePlaceholder')}
+                        onChange={(event) => { setExclude(event.target.value) }}
+                      />
+                    </label>
+                  </div>
                   <div className={css.formFooter}>
                     <label>
                       <span>{t('form.depth')}</span>
                       <select value={depth} onChange={(event) => { setDepth(Number(event.target.value)) }}>
                         {[0, 1, 2, 3].map(value => (
                           <option key={value} value={value}>{t(`form.depth.${value}` as SupraMasKey)}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      <span>{t('form.width')}</span>
+                      <select
+                        value={childCap === null ? 'unlimited' : String(childCap)}
+                        onChange={(event) => {
+                          setChildCap(event.target.value === 'unlimited' ? null : Number(event.target.value))
+                        }}
+                      >
+                        <option value="unlimited">{t('form.width.unlimited')}</option>
+                        {[2, 4, 6, 8].map(value => (
+                          <option key={value} value={value}>{value}</option>
                         ))}
                       </select>
                     </label>
@@ -304,7 +362,7 @@ export function SupraMasTaskPanel({ wide, api, t }: SupraMasTaskPanelProps) {
                   {loading && <p className={css.empty}>{t('tasks.loading')}</p>}
                   {!loading && error === undefined && tasks.length === 0 && <p className={css.empty}>{t('tasks.empty')}</p>}
                   <div className={css.taskList}>
-                    {tasks.map((task) => {
+                    {newestFirst(tasks).map((task) => {
                       const next = nextKey(task)
                       const progress = task.stage1?.progress
                       const canCancel = !['completed', 'failed', 'cancelled'].includes(task.run.phase)
@@ -313,6 +371,7 @@ export function SupraMasTaskPanel({ wide, api, t }: SupraMasTaskPanelProps) {
                           <div className={css.taskTop}>
                             <div>
                               <h4>{task.stage1?.researchTopic ?? task.run.jobId}</h4>
+                              <p className={css.taskMeta}>{taskMetaLine(t, task)}</p>
                               {next !== undefined && <p>{t(next)}</p>}
                             </div>
                             <span className={css.status} data-phase={task.run.phase}>{t(statusKey(task.run.phase))}</span>

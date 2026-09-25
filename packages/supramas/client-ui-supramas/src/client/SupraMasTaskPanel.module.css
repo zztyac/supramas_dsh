@@ -316,6 +316,15 @@
   line-height: 18px;
 }
 
+.taskMeta {
+  margin-top: 2px;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
 .status {
   flex: none;
   padding: 3px 8px;

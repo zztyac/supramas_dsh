@@ -217,6 +217,30 @@ describe('SupraMAS task panel shell', () => {
     await waitFor(() => { expect(list).toHaveBeenCalledTimes(2) })
   })
 
+  it('labels each card with the job id and timestamps, newest task first', async () => {
+    const older: SupraMasRunViewV1 = {
+      ...running,
+      run: { ...running.run, id: 'supramas:older', jobId: 'older-run', createdAt: 1_000, updatedAt: 1_500 },
+      stage1: { ...running.stage1!, researchTopic: 'Older task' },
+    }
+    const newer: SupraMasRunViewV1 = {
+      ...running,
+      run: { ...running.run, id: 'supramas:newer', jobId: 'newer-run', createdAt: 2_000, updatedAt: 2_500 },
+      stage1: { ...running.stage1!, researchTopic: 'Newer task' },
+    }
+    const api = port({ list: vi.fn().mockResolvedValue([older, newer]) })
+    render(<SupraMasTaskPanel {...props(api)} />)
+    const dialog = await openPanel()
+    const cards = await within(dialog).findAllByRole('article')
+    expect(cards).toHaveLength(2)
+    expect(cards[0]!.getAttribute('aria-label')).toBe('Newer task')
+    expect(cards[0]!.textContent).toContain('newer-run')
+    expect(cards[0]!.textContent).toContain('创建于')
+    expect(cards[0]!.textContent).toContain('更新于')
+    expect(cards[1]!.getAttribute('aria-label')).toBe('Older task')
+    expect(cards[1]!.textContent).toContain('older-run')
+  })
+
   it('opens the accepted strategy tree, drills into local evidence, and downloads final outputs', async () => {
     const api = port({ list: vi.fn().mockResolvedValue([completed]) })
     render(<SupraMasTaskPanel {...props(api)} />)
@@ -293,7 +317,14 @@ describe('SupraMAS task actions', () => {
     fireEvent.change(within(dialog).getByLabelText(zh['form.properties']), {
       target: { value: '磁场下 Jc，角度依赖' },
     })
+    fireEvent.change(within(dialog).getByLabelText(zh['form.include']), {
+      target: { value: 'BHO 纳米棒' },
+    })
+    fireEvent.change(within(dialog).getByLabelText(zh['form.exclude']), {
+      target: { value: '纯计算模拟研究' },
+    })
     fireEvent.change(within(dialog).getByLabelText(zh['form.depth']), { target: { value: '3' } })
+    fireEvent.change(within(dialog).getByLabelText(zh['form.width']), { target: { value: '4' } })
     fireEvent.click(within(dialog).getByRole('button', { name: zh['action.create'] }))
 
     await waitFor(() => {
@@ -301,7 +332,10 @@ describe('SupraMAS task actions', () => {
         researchTopic: 'REBCO 人工钉扎中心',
         materialScope: ['REBCO', 'YBCO'],
         targetProperty: ['磁场下 Jc', '角度依赖'],
+        include: ['BHO 纳米棒'],
+        exclude: ['纯计算模拟研究'],
         maxDepth: 3,
+        targetChildNodes: 4,
       })
     })
     expect(await within(dialog).findByText(zh['notice.queued'])).toBeDefined()

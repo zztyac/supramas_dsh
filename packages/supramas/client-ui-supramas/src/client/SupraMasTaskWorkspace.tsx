@@ -132,6 +132,11 @@ export function SupraMasTaskWorkspace({ initial, api, onBack, onViewUpdate, t }:
           <div>
             <h3>{view.stage1?.researchTopic ?? view.run.jobId}</h3>
             <p>{t('detail.subtitle')}</p>
+            <p className={css.taskMeta}>{t('task.meta', {
+              jobId: view.run.jobId,
+              createdAt: new Date(view.run.createdAt).toLocaleString(),
+              updatedAt: new Date(view.run.updatedAt).toLocaleString(),
+            })}</p>
           </div>
           <span className={css.liveState} data-terminal={terminal(view)}>{terminal(view) ? t('detail.settled') : t('detail.live')}</span>
         </div>
