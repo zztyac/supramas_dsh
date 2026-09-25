@@ -39,3 +39,10 @@ apps/web/dist/
 worktrees/
 .agents/worktrees/
 .typert-*/
+
+# SupraMAS run artifacts and local harness homes (never commit research outputs)
+runs/
+.supramas-*
+!.supramas-*.md
+.tmp/
+packages/supramas/client-ui-supramas/dist/

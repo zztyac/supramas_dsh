@@ -312,6 +312,7 @@
     { "path": "./packages/supramas/supramas-domain" },
     { "path": "./packages/supramas/supramas-literature" },
     { "path": "./packages/supramas/supramas-literature-openalex" },
+    { "path": "./packages/supramas/supramas-literature-arxiv" },
     { "path": "./packages/supramas/supramas-paper-http" },
     { "path": "./packages/supramas/supramas-paper-ingest" },
     { "path": "./packages/supramas/supramas-pdf-pypdf" },
