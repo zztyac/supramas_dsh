@@ -128,6 +128,54 @@ describe('SupraMasLiterature bounded search and resolution', () => {
     ambiguous.literature.registerIndexProvider(provider('arxiv'))
     await expect(ambiguous.literature.search({ query: 'q', maxResults: 1 }))
       .rejects.toMatchObject({ code: 'SUPRAMAS_LITERATURE_PROVIDER_AMBIGUOUS' })
+
+    await expect(mount({ indexProvider: 'openalex', indexProviders: ['openalex', 'arxiv'] }))
+      .rejects.toMatchObject({ code: 'SUPRAMAS_LITERATURE_INVALID_REQUEST' })
+
+    const missingFromList = await mount({ indexProviders: ['openalex', 'missing'] })
+    missingFromList.literature.registerIndexProvider(provider('openalex'))
+    await expect(missingFromList.literature.search({ query: 'q', maxResults: 1 }))
+      .rejects.toMatchObject({ code: 'SUPRAMAS_LITERATURE_PROVIDER_CONFIGURED_MISSING' })
+  })
+
+  it('federates configured index providers and deduplicates candidates across sources', async () => {
+    const { literature } = await mount({ indexProviders: ['openalex', 'arxiv'] })
+    literature.registerIndexProvider(provider('openalex', [baseCandidate]))
+    literature.registerIndexProvider(provider('arxiv', [
+      { ...baseCandidate, externalId: '2401.00001', title: 'Same DOI under a different source title' },
+      {
+        externalId: '2401.00002',
+        title: 'BHO nanorod pinning in REBCO films',
+        authors: baseCandidate.authors,
+        year: 2024,
+        doi: '10.1000/bho.1',
+      },
+    ]))
+    const result = await literature.search({ query: 'REBCO pinning', maxResults: 4 })
+    expect(result.candidates.map(candidate => candidate.candidateId)).toEqual([
+      'openalex:W1',
+      'arxiv:2401.00002',
+    ])
+  })
+
+  it('tolerates one failing federated source and fails only when every source fails', async () => {
+    const { literature } = await mount({ indexProviders: ['openalex', 'arxiv'] })
+    literature.registerIndexProvider(provider('openalex', [baseCandidate]))
+    const failing = provider('arxiv', [])
+    failing.search = vi.fn(() => Promise.reject(
+      new LiteratureError('arXiv rate limited', 'SUPRAMAS_LITERATURE_RATE_LIMITED')))
+    literature.registerIndexProvider(failing)
+    const partial = await literature.search({ query: 'REBCO pinning', maxResults: 4 })
+    expect(partial.candidates.map(candidate => candidate.candidateId)).toEqual(['openalex:W1'])
+
+    const allFailing = provider('openalex', [])
+    allFailing.search = vi.fn(() => Promise.reject(
+      new LiteratureError('OpenAlex unavailable', 'SUPRAMAS_LITERATURE_PROVIDER_ERROR')))
+    const bothFail = await mount({ indexProviders: ['openalex', 'arxiv'] })
+    bothFail.literature.registerIndexProvider(allFailing)
+    bothFail.literature.registerIndexProvider(failing)
+    await expect(bothFail.literature.search({ query: 'REBCO pinning', maxResults: 4 }))
+      .rejects.toMatchObject({ code: 'SUPRAMAS_LITERATURE_PROVIDER_ERROR' })
   })
 
   it('routes opaque candidate ids back to the owning provider without trusting model metadata', async () => {
@@ -213,6 +261,72 @@ describe('SupraMasLiterature paper acquisition', () => {
       url: 'https://repository.example.edu/paper.pdf',
       maxBytes: 100,
     }, signal)
+  })
+
+  it('tries resolved document URL fallbacks in order until one yields a verified PDF', async () => {
+    const { literature } = await mount({ acquisitionProvider: 'http', minDocumentBytes: 5, maxDocumentBytes: 100 })
+    const mirrored = provider('openalex')
+    mirrored.resolve = vi.fn((externalId: string) => Promise.resolve({
+      ...baseCandidate,
+      externalId,
+      documentUrl: 'https://publisher.example.org/paper.pdf',
+      documentUrls: [
+        'https://publisher.example.org/paper.pdf',
+        'https://mirror.example.org/paper.pdf',
+        'https://europepmc.org/articles/PMC1?pdf=render',
+      ],
+      documentMediaType: 'application/pdf',
+    }))
+    literature.registerIndexProvider(mirrored)
+    const http = acquisitionProvider('http')
+    const attempts: string[] = []
+    http.acquire = vi.fn((request: PaperAcquisitionRequest) => {
+      attempts.push(request.url)
+      if (request.url === 'https://publisher.example.org/paper.pdf') {
+        return Promise.resolve({ url: request.url, statusCode: 403, mediaType: 'text/html', bytes: new Uint8Array(0) })
+      }
+      if (request.url === 'https://mirror.example.org/paper.pdf') {
+        return Promise.resolve({ url: request.url, statusCode: 200, mediaType: 'text/html', bytes: new TextEncoder().encode('<html>not a pdf</html>') })
+      }
+      return Promise.resolve({ url: request.url, statusCode: 200, mediaType: 'application/pdf', bytes: new TextEncoder().encode('%PDF-1.7\nbody') })
+    })
+    literature.registerAcquisitionProvider(http)
+
+    const result = await literature.acquire('openalex:W1')
+    expect(attempts).toEqual([
+      'https://publisher.example.org/paper.pdf',
+      'https://mirror.example.org/paper.pdf',
+      'https://europepmc.org/articles/PMC1?pdf=render',
+    ])
+    expect(result.finalUrl).toBe('https://europepmc.org/articles/PMC1?pdf=render')
+  })
+
+  it('surfaces the last acquisition failure after every resolved fallback fails', async () => {
+    const { literature } = await mount({ acquisitionProvider: 'http', minDocumentBytes: 5, maxDocumentBytes: 100 })
+    const mirrored = provider('openalex')
+    mirrored.resolve = vi.fn((externalId: string) => Promise.resolve({
+      ...baseCandidate,
+      externalId,
+      documentUrl: 'https://publisher.example.org/paper.pdf',
+      documentUrls: [
+        'https://publisher.example.org/paper.pdf',
+        'https://mirror.example.org/paper.pdf',
+      ],
+    }))
+    literature.registerIndexProvider(mirrored)
+    const http = acquisitionProvider('http')
+    const attempts: string[] = []
+    http.acquire = vi.fn((request: PaperAcquisitionRequest) => {
+      attempts.push(request.url)
+      return Promise.resolve({ url: request.url, statusCode: 503, mediaType: 'text/html', bytes: new Uint8Array(0) })
+    })
+    literature.registerAcquisitionProvider(http)
+
+    await expect(literature.acquire('openalex:W1')).rejects.toMatchObject({ code: 'SUPRAMAS_LITERATURE_HTTP_STATUS' })
+    expect(attempts).toEqual([
+      'https://publisher.example.org/paper.pdf',
+      'https://mirror.example.org/paper.pdf',
+    ])
   })
 
   it('fails before acquisition when no open document exists or provider selection is unsafe', async () => {

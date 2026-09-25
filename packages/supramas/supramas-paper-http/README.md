@@ -27,9 +27,12 @@ Mount it after `@deepseek-ai/dsh-supramas-literature`.
   config:
     timeoutMs: 30000
     maxRedirects: 5
+    retries: 2
+    retryDelayMs: 500
+    maxRetryDelayMs: 10000
 ```
 
-The literature service supplies the byte limit and performs final PDF MIME, magic, and digest checks. This provider never accepts an output path.
+Transient HTTP statuses (403, 408, 429, 5xx) are retried on the same URL with bounded backoff; a `Retry-After` header is honored and capped at `maxRetryDelayMs`. The default User-Agent is a desktop-browser string; override `userAgent` to identify a different client. The literature service supplies the byte limit and performs final PDF MIME, magic, and digest checks. This provider never accepts an output path.
 
 ## Model Experience
 
@@ -52,6 +55,7 @@ The provider changes no static prefix; the eventual import result is append-only
 - Public cross-origin redirects are supported; private, credentialed, malformed, or over-budget redirect targets are rejected.
 - Authentication, cookies, browser state, and paywalled retrieval are intentionally unsupported.
 - A source that omits or lies about `Content-Length` is still bounded while streaming.
+- Same-URL retries cover transient HTTP statuses only; transport-level failures (DNS, TLS, timeout) still fail the attempt without retry.
 
 ### Dev Note
 

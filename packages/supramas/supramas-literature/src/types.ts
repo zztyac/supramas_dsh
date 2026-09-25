@@ -41,6 +41,8 @@ export interface LiteratureSearchResult {
 /** Provider-only resolution adds acquisition data that search does not expose. */
 export interface ResolvedLiteratureProviderCandidate extends LiteratureProviderCandidate {
   readonly documentUrl?: string
+  /** Ordered open-document URL fallbacks; the first entry equals documentUrl when present. */
+  readonly documentUrls?: readonly string[]
   readonly documentMediaType?: string
   readonly license?: string
 }

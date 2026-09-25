@@ -32,7 +32,7 @@ kind: "package-reference"
     parserProvider: pypdf
 ```
 
-检索结果不包含 PDF 地址。`acquire()` 在内部解析不透明候选，并校验 MIME、PDF 文件头、大小和 SHA-256。`parseDocument()` 只接受内部绝对路径，并再次校验提供器输出。`chunkParsedPages()` 永不跨页分块。
+检索结果不包含 PDF 地址。`acquire()` 在内部解析不透明候选，按序尝试提供器暴露的每个文档 URL（显式发现的 `documentUrl` 优先，然后是解析得到的回退列表），全部失败才报错，并对第一个返回字节的 URL 校验 MIME、PDF 文件头、大小和 SHA-256。`parseDocument()` 只接受内部绝对路径，并再次校验提供器输出。`chunkParsedPages()` 永不跨页分块。
 
 <a id="model-experience"></a>
 
@@ -59,6 +59,7 @@ kind: "package-reference"
 - 可用性检查只反映本地配置，远端健康状态要到请求执行时才能确定。
 - 纯扫描图片 PDF 会作为无文本文件被拒绝；当前未实现 OCR。
 - 候选去重依次使用外部 ID、DOI 和规范化标题，不等同于语义引文聚类。
+- 获取回退对每个解析出的文档 URL 只尝试一次；每 URL 的传输重试策略属于获取提供器。
 
 <a id="dev-note"></a>
 

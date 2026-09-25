@@ -35,6 +35,8 @@ export class LiteratureError extends HarnessError {
 export interface LiteratureConfig {
   /** Explicit structured-index provider id. Omitted means exactly one usable provider must exist. */
   readonly indexProvider?: string
+  /** Explicit ordered structured-index provider ids for federated search. */
+  readonly indexProviders?: string[]
   /** Explicit PDF acquisition provider id. Omitted means exactly one usable provider must exist. */
   readonly acquisitionProvider?: string
   /** Explicit full-text parser provider id. Omitted means exactly one usable provider must exist. */
@@ -95,21 +97,29 @@ function selectedProvider<P extends SelectableProvider>(
   providers: ReadonlyMap<string, P>,
   configuredId: string | undefined,
 ): P {
+  const selected = selectedIndexProviders(providers, configuredId, undefined)
+  const provider = selected[0]
+  if (selected.length !== 1 || provider === undefined) {
+    throw new LiteratureError('index provider selection must resolve to one provider', 'SUPRAMAS_LITERATURE_PROVIDER_ERROR')
+  }
+  return provider
+}
+
+/** Resolve the ordered provider list for one search: explicit ids, or the single usable default. */
+function selectedIndexProviders<P extends SelectableProvider>(
+  providers: ReadonlyMap<string, P>,
+  configuredId: string | undefined,
+  configuredIds: readonly string[] | undefined,
+): P[] {
   if (configuredId !== undefined) {
-    const provider = providers.get(configuredId)
-    if (provider === undefined) {
-      throw new LiteratureError(
-        `configured literature provider "${configuredId}" is not registered`,
-        'SUPRAMAS_LITERATURE_PROVIDER_CONFIGURED_MISSING',
-      )
+    const provider = requiredProvider(providers, configuredId)
+    return [provider]
+  }
+  if (configuredIds !== undefined) {
+    if (configuredIds.length === 0) {
+      throw new LiteratureError('indexProviders must list at least one provider id', 'SUPRAMAS_LITERATURE_INVALID_REQUEST')
     }
-    if (!provider.available()) {
-      throw new LiteratureError(
-        `configured literature provider "${configuredId}" is unavailable`,
-        'SUPRAMAS_LITERATURE_PROVIDER_CONFIGURED_UNAVAILABLE',
-      )
-    }
-    return provider
+    return [...new Set(configuredIds)].map(id => requiredProvider(providers, id))
   }
   const usable = [...providers.values()].filter(provider => provider.available())
   const provider = usable[0]
@@ -121,6 +131,24 @@ function selectedProvider<P extends SelectableProvider>(
     throw new LiteratureError(
       `multiple usable literature providers are registered (${ids}); configure one explicitly`,
       'SUPRAMAS_LITERATURE_PROVIDER_AMBIGUOUS',
+    )
+  }
+  return [provider]
+}
+
+/** Look up one configured provider and confirm it is usable. */
+function requiredProvider<P extends SelectableProvider>(providers: ReadonlyMap<string, P>, id: string): P {
+  const provider = providers.get(id)
+  if (provider === undefined) {
+    throw new LiteratureError(
+      `configured literature provider "${id}" is not registered`,
+      'SUPRAMAS_LITERATURE_PROVIDER_CONFIGURED_MISSING',
+    )
+  }
+  if (!provider.available()) {
+    throw new LiteratureError(
+      `configured literature provider "${id}" is unavailable`,
+      'SUPRAMAS_LITERATURE_PROVIDER_CONFIGURED_UNAVAILABLE',
     )
   }
   return provider
@@ -147,6 +175,20 @@ function candidateFrom(providerId: string, candidate: LiteratureProviderCandidat
 
 function normalizedDoi(value: string | undefined): string | undefined {
   return value?.trim().replace(/^https?:\/\/(?:dx\.)?doi\.org\//i, '').toLowerCase()
+}
+
+function documentUrlList(urls: readonly string[]): string[] {
+  const seen = new Set<string>()
+  const normalized: string[] = []
+  for (const url of urls) {
+    const trimmed = url.trim()
+    if (trimmed.length === 0) continue
+    const key = trimmed.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    normalized.push(trimmed)
+  }
+  return normalized
 }
 
 function normalizedTitle(value: string): string {
@@ -239,6 +281,7 @@ export function chunkParsedPages(
 export class SupraMasLiterature extends Service {
   static Config: z<LiteratureConfig> = z.object({
     indexProvider: z.string(),
+    indexProviders: z.array(z.string()),
     acquisitionProvider: z.string(),
     parserProvider: z.string(),
     maxResults: z.number().default(DEFAULT_MAX_RESULTS),
@@ -254,6 +297,7 @@ export class SupraMasLiterature extends Service {
   private readonly acquisitionProviders = new Map<string, PaperAcquisitionProvider>()
   private readonly parserProviders = new Map<string, DocumentParserProvider>()
   private readonly configuredProvider: string | undefined
+  private readonly configuredIndexProviders: string[] | undefined
   private readonly configuredAcquisitionProvider: string | undefined
   private readonly configuredParserProvider: string | undefined
   private readonly maxResults: number
@@ -266,7 +310,18 @@ export class SupraMasLiterature extends Service {
 
   constructor(ctx: Context, config: LiteratureConfig = {}) {
     super(ctx, 'supramasLiterature')
-    this.configuredProvider = config.indexProvider
+    const singularIndex = config.indexProvider
+    const pluralIndex = config.indexProviders !== undefined && config.indexProviders.length > 0
+      ? [...config.indexProviders]
+      : undefined
+    if (singularIndex !== undefined && pluralIndex !== undefined) {
+      throw new LiteratureError(
+        'configure either indexProvider or indexProviders, not both',
+        'SUPRAMAS_LITERATURE_INVALID_REQUEST',
+      )
+    }
+    this.configuredProvider = singularIndex
+    this.configuredIndexProviders = pluralIndex
     this.configuredAcquisitionProvider = config.acquisitionProvider
     this.configuredParserProvider = config.parserProvider
     this.maxResults = positiveInteger(config.maxResults ?? DEFAULT_MAX_RESULTS, 'maxResults')
@@ -348,9 +403,12 @@ export class SupraMasLiterature extends Service {
   }
 
   /**
-   * Search one selected structured index with complete service-owned bounds.
-   * @param request - Normalized query and requested result bound.
-   * @param signal - Optional cancellation signal forwarded to the provider.
+   * Search the configured structured indexes with complete service-owned bounds.
+   * With multiple configured index providers the search fans out to every provider,
+   * merges their namespaced candidates, and deduplicates across sources; a source
+   * that fails is skipped as long as one source still answers.
+   * @param request - Normalized search query and requested result bound.
+   * @param signal - Optional cancellation signal forwarded to the providers.
    * @returns bounded, deduplicated candidates with opaque ids.
    */
   async search(request: LiteratureSearchRequest, signal?: AbortSignal): Promise<LiteratureSearchResult> {
@@ -365,13 +423,42 @@ export class SupraMasLiterature extends Service {
         'SUPRAMAS_LITERATURE_INVALID_REQUEST',
       )
     }
-    const provider = selectedProvider(this.providers, this.configuredProvider)
-    const result = await provider.search({ query, maxResults }, signal)
-    const normalized = deduplicate(result.candidates.map(candidate => candidateFrom(provider.id, candidate)))
-    const overReturned = result.candidates.length > maxResults || normalized.length > maxResults
+    const providers = selectedIndexProviders(this.providers, this.configuredProvider, this.configuredIndexProviders)
+    const outcomes = await Promise.all(providers.map(async (provider): Promise<{
+      id: string
+      candidates?: LiteratureProviderCandidate[]
+      truncated?: boolean
+      error?: unknown
+    }> => {
+      try {
+        const result = await provider.search({ query, maxResults }, signal)
+        return { id: provider.id, candidates: [...result.candidates], truncated: result.truncated }
+      } catch (error: unknown) {
+        return { id: provider.id, error }
+      }
+    }))
+    const answered = outcomes.filter((outcome): outcome is {
+      id: string
+      candidates: LiteratureProviderCandidate[]
+      truncated: boolean
+    } => outcome.candidates !== undefined)
+    if (answered.length === 0) {
+      const failure = outcomes[0]
+      const error = failure?.error
+      if (error instanceof LiteratureError) throw error
+      throw new LiteratureError(
+        'no configured index provider answered the search',
+        'SUPRAMAS_LITERATURE_PROVIDER_ERROR',
+        error === undefined ? undefined : { cause: error },
+      )
+    }
+    const merged = deduplicate(answered.flatMap(outcome =>
+      outcome.candidates.map(candidate => candidateFrom(outcome.id, candidate))))
+    const rawTotal = answered.reduce((total, outcome) => total + outcome.candidates.length, 0)
+    const overReturned = rawTotal > maxResults || merged.length > maxResults
     return {
-      candidates: normalized.slice(0, maxResults),
-      truncated: result.truncated || overReturned,
+      candidates: merged.slice(0, maxResults),
+      truncated: answered.some(outcome => outcome.truncated) || overReturned,
     }
   }
 
@@ -400,6 +487,9 @@ export class SupraMasLiterature extends Service {
     return {
       ...candidate,
       ...(resolved.documentUrl === undefined ? {} : { documentUrl: resolved.documentUrl }),
+      ...(resolved.documentUrls === undefined || resolved.documentUrls.length === 0
+        ? {}
+        : { documentUrls: documentUrlList(resolved.documentUrls) }),
       ...(resolved.documentMediaType === undefined ? {} : { documentMediaType: resolved.documentMediaType }),
       ...(resolved.license === undefined ? {} : { license: resolved.license }),
     }
@@ -407,21 +497,52 @@ export class SupraMasLiterature extends Service {
 
   /**
    * Resolve and acquire one open-access PDF without accepting caller-supplied metadata or URLs.
+   * When the resolved candidate exposes ordered document URL fallbacks, every URL is tried in
+   * order until one yields a verified complete PDF, so a single blocked or broken mirror does
+   * not fail the acquisition.
    * @param candidateId - Opaque provider-qualified candidate identity.
    * @param signal - Optional cancellation signal forwarded through acquisition.
+   * @param documentUrl - Optional caller-discovered direct PDF for the same candidate.
    * @returns complete verified PDF bytes plus safe candidate metadata and digest.
    */
   async acquire(candidateId: string, signal?: AbortSignal, documentUrl?: string): Promise<AcquiredPaper> {
     const candidate = await this.resolve(candidateId, signal)
-    const sourceUrl = documentUrl?.trim() || candidate.documentUrl
-    if (sourceUrl === undefined) {
+    const explicitUrl = documentUrl?.trim()
+    const urls: string[] = []
+    if (explicitUrl !== undefined && explicitUrl.length > 0) urls.push(explicitUrl)
+    for (const url of candidate.documentUrls ?? (candidate.documentUrl === undefined ? [] : [candidate.documentUrl])) {
+      if (!urls.includes(url)) urls.push(url)
+    }
+    if (urls.length === 0) {
       throw new LiteratureError(
         `candidate ${candidateId} has no resolved open document`,
         'SUPRAMAS_LITERATURE_SOURCE_UNAVAILABLE',
       )
     }
     const provider = selectedProvider(this.acquisitionProviders, this.configuredAcquisitionProvider)
-    const result = await provider.acquire({ url: sourceUrl, maxBytes: this.maxDocumentBytes }, signal)
+    let lastError: unknown
+    for (const url of urls) {
+      try {
+        return await this.acquireVerified(provider, candidate, url, signal)
+      } catch (error: unknown) {
+        if (signal?.aborted || (error instanceof LiteratureError && error.code === 'SUPRAMAS_LITERATURE_ABORTED')) {
+          throw error
+        }
+        lastError = error
+      }
+    }
+    /* v8 ignore next -- urls is non-empty, so lastError is always assigned before this line. */
+    throw lastError
+  }
+
+  /** Acquire one URL and verify status, size, and PDF bytes before returning the paper. */
+  private async acquireVerified(
+    provider: PaperAcquisitionProvider,
+    candidate: ResolvedLiteratureCandidate,
+    url: string,
+    signal: AbortSignal | undefined,
+  ): Promise<AcquiredPaper> {
+    const result = await provider.acquire({ url, maxBytes: this.maxDocumentBytes }, signal)
     if (result.statusCode < 200 || result.statusCode >= 300) {
       throw new LiteratureError(
         `paper source returned HTTP ${result.statusCode}`,

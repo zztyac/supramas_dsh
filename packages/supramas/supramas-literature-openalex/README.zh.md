@@ -26,9 +26,11 @@ kind: "package-reference"
 
 ```yaml
 - name: '@deepseek-ai/dsh-supramas-literature-openalex'
+  config:
+    mailto: 'team@example.org'
 ```
 
-提供器使用 `search`、当前 `per_page` 分页和固定 `select` 字段列表。它从倒排索引重建摘要，并保留稀疏记录，不补造缺失字段。
+可选的 `mailto` 联系地址会附加到每个 OpenAlex 请求，用于进入 polite pool。提供器使用 `search`、当前 `per_page` 分页和固定 `select` 字段列表。它从倒排索引重建摘要，并保留稀疏记录，不补造缺失字段。候选解析会暴露一个有序、去重的开放文档 URL 回退列表，由 `best_oa_location`、全部开放 `locations` 以及该作品的 arXiv 和 EuropePMC 仓库 id 构成，上限六个 URL；文献获取服务会按序尝试。
 
 <a id="model-experience"></a>
 
@@ -52,8 +54,8 @@ kind: "package-reference"
 
 ## 已知限制与后续工作
 
-- 受 OpenAlex 限流和上游可用性影响。
-- 候选解析只使用上游报告的最佳开放获取 PDF 位置。
+- 受 OpenAlex 限流和上游可用性影响；可选 `mailto` 配置让请求进入 polite pool，但不提供客户端退避。
+- 候选解析最多暴露六个开放文档 URL：最佳开放获取位置、每个开放位置的 PDF，外加由作品 id 推导的 arXiv 和 EuropePMC 镜像。只要作品本身标记为开放，仓库镜像同样对出版商位置不可用的作品开放；已验证的付费墙来源仍不可达。
 - 本提供器不下载或解析文档。
 
 <a id="dev-note"></a>

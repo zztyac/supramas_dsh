@@ -30,7 +30,7 @@ Mount the service before its OpenAlex, HTTP, parser, ingestion, or tool consumer
     parserProvider: pypdf
 ```
 
-Search returns metadata without a PDF URL. `acquire()` resolves the opaque candidate internally and verifies MIME, PDF magic, size, and SHA-256. `parseDocument()` accepts only an absolute internal path and revalidates provider output. `chunkParsedPages()` never crosses page boundaries.
+Search returns metadata without a PDF URL. `acquire()` resolves the opaque candidate internally, tries every ordered document URL the provider exposed (an explicitly discovered `documentUrl` first, then the resolved fallbacks) before failing, and verifies MIME, PDF magic, size, and SHA-256 on the first URL that yields bytes. `parseDocument()` accepts only an absolute internal path and revalidates provider output. `chunkParsedPages()` never crosses page boundaries.
 
 ## Model Experience
 
@@ -53,6 +53,7 @@ Mounting or selecting a provider changes no static request prefix. Only later to
 - Provider availability is local and cheap; remote health is known only when a request runs.
 - Scanned image-only PDFs are rejected as no-text documents; OCR is not implemented.
 - Candidate deduplication uses external ID, DOI, then normalized title and is not semantic citation clustering.
+- Acquisition fallback tries each resolved document URL once; the per-URL transport retry policy belongs to the acquisition provider.
 
 ### Dev Note
 

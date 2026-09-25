@@ -29,9 +29,12 @@ kind: "package-reference"
   config:
     timeoutMs: 30000
     maxRedirects: 5
+    retries: 2
+    retryDelayMs: 500
+    maxRetryDelayMs: 10000
 ```
 
-字节上限由文献服务提供，最终 PDF MIME、文件头和摘要校验也由文献服务执行。本提供器从不接受输出路径。
+瞬时 HTTP 状态（403、408、429、5xx）会在同一 URL 上以有界退避重试；遵循 `Retry-After` 响应头并以 `maxRetryDelayMs` 封顶。默认 User-Agent 为桌面浏览器字符串，可通过 `userAgent` 覆盖。字节上限由文献服务提供，最终 PDF MIME、文件头和摘要校验也由文献服务执行。本提供器从不接受输出路径。
 
 <a id="model-experience"></a>
 
@@ -58,6 +61,7 @@ kind: "package-reference"
 - 支持公共跨源重定向；私有、带凭据、格式错误或超过跳数预算的目标会被拒绝。
 - 有意不支持认证、Cookie、浏览器状态和付费墙获取。
 - 即使来源省略或伪造 `Content-Length`，流式读取仍受字节上限保护。
+- 同 URL 重试只覆盖瞬时 HTTP 状态；传输层故障（DNS、TLS、超时）仍不重试、直接失败。
 
 <a id="dev-note"></a>
 

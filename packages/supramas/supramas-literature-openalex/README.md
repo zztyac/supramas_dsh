@@ -24,9 +24,11 @@ Mount it after `ctx.web` and `ctx.supramasLiterature`.
 
 ```yaml
 - name: '@deepseek-ai/dsh-supramas-literature-openalex'
+  config:
+    mailto: 'team@example.org'
 ```
 
-The provider uses `search`, current `per_page` paging, and a fixed `select` list. It reconstructs abstracts from the inverted index and preserves sparse records without inventing missing values.
+The optional `mailto` contact address is appended to every OpenAlex request for the polite pool. The provider uses `search`, current `per_page` paging, and a fixed `select` list. It reconstructs abstracts from the inverted index and preserves sparse records without inventing missing values. Resolution exposes an ordered, deduplicated open-document URL fallback list built from `best_oa_location`, all open `locations`, and the work's arXiv and EuropePMC repository ids, capped at six URLs; the literature acquisition service tries them in order.
 
 ## Model Experience
 
@@ -46,8 +48,8 @@ There is no static-prefix effect; each bounded search response is an append-only
 
 ## Known Limitations and Deferred Work
 
-- OpenAlex rate limits and upstream availability apply.
-- Only the best reported open-access PDF location is used during resolution.
+- OpenAlex rate limits and upstream availability apply; the optional `mailto` config opts requests into the polite pool but adds no client-side backoff.
+- Resolution uses up to six open-document URLs: the best open-access location, every open location PDF, plus arXiv and EuropePMC mirrors derived from the work ids. Repository mirrors are exposed even for closed-access works when the work itself is flagged open; verified paywalled sources remain unreachable.
 - This provider does not download or parse documents.
 
 ### Dev Note

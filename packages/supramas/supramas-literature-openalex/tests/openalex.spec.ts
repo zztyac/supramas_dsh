@@ -75,6 +75,7 @@ describe('OpenAlexIndexProvider', () => {
     expect(resolved).toMatchObject({
       externalId: 'W2741809807',
       documentUrl: 'https://arxiv.org/pdf/cond-mat/0406087',
+      documentUrls: ['https://arxiv.org/pdf/cond-mat/0406087'],
       documentMediaType: 'application/pdf',
       license: 'cc-by-nc-sa',
     })
@@ -82,6 +83,78 @@ describe('OpenAlexIndexProvider', () => {
     await expect(provider.resolve('../authors/A1')).rejects.toMatchObject({
       code: 'SUPRAMAS_LITERATURE_INVALID_REQUEST',
     })
+  })
+
+  it('collects ordered deduplicated open-document URL fallbacks from locations and repository ids', async () => {
+    const mirrored = {
+      ...work,
+      locations: [
+        { pdf_url: 'https://mirror.example.org/paper.pdf' },
+        { pdf_url: 'https://arxiv.org/pdf/cond-mat/0406087' },
+        { pdf_url: 'https://broken.example.org/paper.pdf' },
+        { pdf_url: 'https://mirror.example.org/paper.pdf' },
+        { pdf_url: 'https://extra1.example.org/paper.pdf' },
+        { pdf_url: 'https://extra2.example.org/paper.pdf' },
+        { pdf_url: 'https://extra3.example.org/paper.pdf' },
+        { pdf_url: 'https://extra4.example.org/paper.pdf' },
+      ],
+      ids: {
+        arxiv: 'https://arxiv.org/abs/2103.01234v2',
+        pmcid: 'https://www.ncbi.nlm.nih.gov/pmc/articles/PMC5537340/',
+      },
+    }
+    const fixture = fetchFixture(mirrored)
+    const resolved = await new OpenAlexIndexProvider(fixture.fetchText).resolve('W2741809807')
+    expect(resolved.documentUrls).toEqual([
+      'https://arxiv.org/pdf/cond-mat/0406087',
+      'https://mirror.example.org/paper.pdf',
+      'https://broken.example.org/paper.pdf',
+      'https://extra1.example.org/paper.pdf',
+      'https://extra2.example.org/paper.pdf',
+      'https://extra3.example.org/paper.pdf',
+    ])
+    expect(resolved.documentUrl).toBe(resolved.documentUrls?.[0])
+  })
+
+  it('exposes repository mirrors for closed-access publisher locations without inventing OA facts', async () => {
+    const green = {
+      ...work,
+      best_oa_location: null,
+      open_access: { is_oa: true, oa_status: 'green' },
+      locations: null,
+      ids: { pmcid: 'PMC5537340' },
+    }
+    const fixture = fetchFixture(green)
+    const resolved = await new OpenAlexIndexProvider(fixture.fetchText).resolve('W2741809807')
+    expect(resolved.openAccess).toBe(true)
+    expect(resolved.documentUrls).toEqual(['https://europepmc.org/articles/PMC5537340?pdf=render'])
+    expect(resolved.documentUrl).toBe('https://europepmc.org/articles/PMC5537340?pdf=render')
+  })
+
+  it('omits document URLs entirely for closed-access works without repository mirrors', async () => {
+    const closed = {
+      ...work,
+      best_oa_location: null,
+      open_access: { is_oa: false, oa_status: 'closed' },
+      ids: { doi: 'https://doi.org/10.1/closed' },
+    }
+    const fixture = fetchFixture(closed)
+    const resolved = await new OpenAlexIndexProvider(fixture.fetchText).resolve('W2741809807')
+    expect(resolved.documentUrl).toBeUndefined()
+    expect(resolved.documentUrls).toBeUndefined()
+  })
+
+  it('appends the configured mailto contact to search and resolve requests', async () => {
+    const searchFixture = fetchFixture({ meta: { count: 0 }, results: [] })
+    const provider = new OpenAlexIndexProvider(searchFixture.fetchText, 'team@example.org')
+    await provider.search({ query: 'REBCO pinning', maxResults: 5 })
+    const searchUrl = new URL(searchFixture.calls[0]!)
+    expect(searchUrl.searchParams.get('mailto')).toBe('team@example.org')
+    const resolveFixture = fetchFixture(work)
+    const resolving = new OpenAlexIndexProvider(resolveFixture.fetchText, 'team@example.org')
+    await resolving.resolve('W2741809807')
+    const resolveUrl = new URL(resolveFixture.calls[0]!)
+    expect(resolveUrl.searchParams.get('mailto')).toBe('team@example.org')
   })
 
   it('preserves sparse records without inventing DOI, venue, abstract, or OA facts', async () => {

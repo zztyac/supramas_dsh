@@ -134,4 +134,64 @@ describe('HttpPaperAcquisitionProvider', () => {
     await expect(provider().acquire({ url: `${base}/cancel`, maxBytes: 5 }, controller.signal))
       .rejects.toMatchObject({ code: 'SUPRAMAS_LITERATURE_ABORTED' })
   })
+
+  it('retries retryable HTTP statuses on the same URL and succeeds after a transient 403', async () => {
+    let calls = 0
+    handler = (_request, response) => {
+      calls++
+      if (calls === 1) {
+        response.writeHead(403, { 'content-type': 'text/html', 'retry-after': '0' })
+        response.end('forbidden')
+        return
+      }
+      response.writeHead(200, { 'content-type': 'application/pdf' })
+      response.end('%PDF-')
+    }
+    await expect(provider({ retryDelayMs: 1 }).acquire({ url: `${base}/flaky.pdf`, maxBytes: 100 }))
+      .resolves.toMatchObject({ statusCode: 200, url: `${base}/flaky.pdf` })
+    expect(calls).toBe(2)
+  })
+
+  it('returns the final status without retrying non-retryable statuses', async () => {
+    let calls = 0
+    handler = (_request, response) => {
+      calls++
+      response.writeHead(404, { 'content-type': 'text/html' })
+      response.end('not found')
+    }
+    const result = await provider().acquire({ url: `${base}/missing.pdf`, maxBytes: 100 })
+    expect(result.statusCode).toBe(404)
+    expect(calls).toBe(1)
+  })
+
+  it('stops retrying after the configured retry budget and reports the last status', async () => {
+    let calls = 0
+    handler = (_request, response) => {
+      calls++
+      response.writeHead(503, { 'content-type': 'text/html' })
+      response.end('unavailable')
+    }
+    const result = await provider({ retries: 2, retryDelayMs: 1 }).acquire({ url: `${base}/down.pdf`, maxBytes: 100 })
+    expect(result.statusCode).toBe(503)
+    expect(result.bytes.byteLength).toBe(0)
+    expect(calls).toBe(3)
+  })
+
+  it('caps Retry-After waits at the configured maximum and never exceeds the acquisition deadline', async () => {
+    let calls = 0
+    handler = (_request, response) => {
+      calls++
+      if (calls === 1) {
+        response.writeHead(429, { 'content-type': 'text/html', 'retry-after': '3600' })
+        response.end('slow down')
+        return
+      }
+      response.writeHead(200, { 'content-type': 'application/pdf' })
+      response.end('%PDF-')
+    }
+    await expect(provider({ retryDelayMs: 1, maxRetryDelayMs: 5, timeoutMs: 5_000 })
+      .acquire({ url: `${base}/throttled.pdf`, maxBytes: 100 }))
+      .resolves.toMatchObject({ statusCode: 200 })
+    expect(calls).toBe(2)
+  })
 })

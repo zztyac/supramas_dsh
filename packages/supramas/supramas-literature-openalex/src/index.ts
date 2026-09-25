@@ -1,6 +1,7 @@
 /** Keyless OpenAlex structured-index provider for `ctx.supramasLiterature`. */
 
 import type { Context } from '@deepseek-ai/cordis'
+import z from '@deepseek-ai/schemastery'
 import type { WebFetchResult } from '@deepseek-ai/dsh-web'
 import type {} from '@deepseek-ai/dsh-web'
 import {
@@ -23,9 +24,21 @@ export interface OpenAlexFetchTextResult {
 /** Injectable text retrieval boundary used by focused provider tests. */
 export type OpenAlexFetchText = (url: string, signal?: AbortSignal) => Promise<OpenAlexFetchTextResult>
 
+/** Contact address appended to every OpenAlex request for the polite pool. */
+export interface Config {
+  readonly mailto?: string
+}
+
+export const Config: z<Config> = z.object({
+  mailto: z.string(),
+})
+
 const API_ROOT = 'https://api.openalex.org'
 const PROVIDER_ID = 'openalex'
 const WORK_ID = /^W\d+$/i
+const MAX_DOCUMENT_URLS = 6
+const ARXIV_ID = /^(?:[a-z-]+(?:\.[a-z-]+)?\/\d{7}|\d{4}\.\d{4,5})(?:v\d+)?$/i
+const PMC_ID = /(PMC\d+)$/i
 const SELECT = [
   'id',
   'doi',
@@ -35,6 +48,8 @@ const SELECT = [
   'publication_year',
   'primary_location',
   'best_oa_location',
+  'locations',
+  'ids',
   'open_access',
   'abstract_inverted_index',
   'cited_by_count',
@@ -115,6 +130,55 @@ function reconstructAbstract(value: unknown): string | undefined {
   return positioned.length === 0 ? undefined : positioned.map(entry => entry.word).join(' ')
 }
 
+/** Extract a bare arXiv id from an OpenAlex work id entry, tolerating abs-URL forms. */
+function arxivDocumentId(value: unknown): string | undefined {
+  const raw = optionalString(value, 'work.ids.arxiv')
+  if (raw === undefined) return undefined
+  const stripped = raw.replace(/^https?:\/\/arxiv\.org\/abs\//i, '').replace(/\/+$/, '')
+  return ARXIV_ID.test(stripped) ? stripped : undefined
+}
+
+/** Extract a normalized PMC id from an OpenAlex work id entry, tolerating article-URL forms. */
+function pmcDocumentId(value: unknown): string | undefined {
+  const raw = optionalString(value, 'work.ids.pmcid')
+  if (raw === undefined) return undefined
+  const match = raw.match(PMC_ID)
+  const id = match?.[1]
+  return id === undefined ? undefined : id.toUpperCase()
+}
+
+/**
+ * Collect an ordered, deduplicated open-document URL fallback list for one work:
+ * publisher open PDF locations first (guarded by the work OA flag), then the
+ * arXiv and EuropePMC open-repository mirrors derived from the work ids.
+ */
+function documentUrls(work: Record<string, unknown>, isOa: boolean | undefined): string[] {
+  const urls: string[] = []
+  const push = (url: string | undefined): void => {
+    if (url === undefined) return
+    if (urls.some(existing => existing.toLowerCase() === url.toLowerCase())) return
+    if (urls.length >= MAX_DOCUMENT_URLS) return
+    urls.push(url)
+  }
+  if (isOa !== false) {
+    push(optionalString(optionalObject(work.best_oa_location, 'work.best_oa_location')?.pdf_url, 'work.best_oa_location.pdf_url'))
+    const locations = work.locations
+    if (Array.isArray(locations)) {
+      for (const entry of locations) {
+        if (entry === null || entry === undefined) continue
+        const location = object(entry, 'work.locations[]')
+        push(optionalString(location.pdf_url, 'work.locations[].pdf_url'))
+      }
+    }
+  }
+  const ids = optionalObject(work.ids, 'work.ids')
+  const arxiv = arxivDocumentId(ids?.arxiv)
+  if (arxiv !== undefined) push(`https://arxiv.org/pdf/${arxiv}`)
+  const pmc = pmcDocumentId(ids?.pmcid)
+  if (pmc !== undefined) push(`https://europepmc.org/articles/${pmc}?pdf=render`)
+  return urls
+}
+
 function mapWork(value: unknown): { candidate: LiteratureProviderCandidate; resolved: ResolvedLiteratureProviderCandidate } {
   const work = object(value, 'work')
   const title = optionalString(work.display_name ?? work.title, 'work.title')
@@ -124,7 +188,6 @@ function mapWork(value: unknown): { candidate: LiteratureProviderCandidate; reso
   const best = optionalObject(work.best_oa_location, 'work.best_oa_location')
   const oa = optionalObject(work.open_access, 'work.open_access')
   const isOa = optionalBoolean(oa?.is_oa, 'work.open_access.is_oa')
-  const pdfUrl = optionalString(best?.pdf_url, 'work.best_oa_location.pdf_url')
   const landingUrl = optionalString(best?.landing_page_url ?? oa?.oa_url, 'work.best_oa_location.landing_page_url')
   const publicationYear = optionalInteger(work.publication_year, 'work.publication_year')
   const normalizedDoi = doi(work.doi)
@@ -132,6 +195,7 @@ function mapWork(value: unknown): { candidate: LiteratureProviderCandidate; reso
   const abstract = reconstructAbstract(work.abstract_inverted_index)
   const citedByCount = optionalInteger(work.cited_by_count, 'work.cited_by_count')
   const license = optionalString(best?.license, 'work.best_oa_location.license')
+  const urls = documentUrls(work, isOa)
   const candidate: LiteratureProviderCandidate = {
     externalId: externalId(work.id),
     title,
@@ -148,7 +212,9 @@ function mapWork(value: unknown): { candidate: LiteratureProviderCandidate; reso
     candidate,
     resolved: {
       ...candidate,
-      ...(pdfUrl === undefined || isOa === false ? {} : { documentUrl: pdfUrl, documentMediaType: 'application/pdf' }),
+      ...(urls.length === 0
+        ? {}
+        : { documentUrl: urls[0], documentUrls: urls, documentMediaType: 'application/pdf' }),
       ...(license === undefined ? {} : { license }),
     },
   }
@@ -173,10 +239,20 @@ function parseJson(response: OpenAlexFetchTextResult): unknown {
 export class OpenAlexIndexProvider implements LiteratureIndexProvider {
   readonly id = PROVIDER_ID
 
-  constructor(private readonly fetchText: OpenAlexFetchText) {}
+  constructor(
+    private readonly fetchText: OpenAlexFetchText,
+    private readonly mailto?: string,
+  ) {}
 
   available(): boolean {
     return true
+  }
+
+  /** Full request URL including the optional polite-pool contact parameter. */
+  private apiUrl(path: string): URL {
+    const url = new URL(path, API_ROOT)
+    if (this.mailto !== undefined) url.searchParams.set('mailto', this.mailto)
+    return url
   }
 
   /**
@@ -186,7 +262,7 @@ export class OpenAlexIndexProvider implements LiteratureIndexProvider {
    * @returns sparse-safe provider candidates and truncation state.
    */
   async search(request: LiteratureSearchRequest, signal?: AbortSignal): Promise<LiteratureProviderSearchResult> {
-    const url = new URL('/works', API_ROOT)
+    const url = this.apiUrl('/works')
     url.searchParams.set('search', request.query)
     url.searchParams.set('per_page', String(request.maxResults))
     url.searchParams.set('select', SELECT)
@@ -202,13 +278,13 @@ export class OpenAlexIndexProvider implements LiteratureIndexProvider {
    * Resolve one OpenAlex work for internal acquisition metadata.
    * @param workId - W-prefixed OpenAlex work identity from an opaque candidate id.
    * @param signal - Optional cancellation signal for the HTTP request.
-   * @returns the validated candidate and best reported open PDF location, when present.
+   * @returns the validated candidate and its ordered open-document URL fallbacks.
    */
   async resolve(workId: string, signal?: AbortSignal): Promise<ResolvedLiteratureProviderCandidate> {
     if (!WORK_ID.test(workId)) {
       throw new LiteratureError('OpenAlex candidate id must be a W-prefixed work id', 'SUPRAMAS_LITERATURE_INVALID_REQUEST')
     }
-    const url = new URL(`/works/${workId.toUpperCase()}`, API_ROOT)
+    const url = this.apiUrl(`/works/${workId.toUpperCase()}`)
     url.searchParams.set('select', SELECT)
     return mapWork(parseJson(await this.fetchText(url.toString(), signal))).resolved
   }
@@ -227,7 +303,11 @@ function fromWeb(result: WebFetchResult): OpenAlexFetchTextResult {
 }
 
 /** Register the keyless OpenAlex provider through the shared safe text-fetch seam. */
-export function apply(ctx: Context): void {
+export function apply(ctx: Context, config: Config = {}): void {
+  const mailto = config.mailto?.trim()
+  if (mailto !== undefined && mailto.length > 0 && !/^[^\s@]+@[^\s@]+$/.test(mailto)) {
+    throw new Error('supramas-literature-openalex: mailto must be a valid contact email address')
+  }
   ctx.supramasLiterature.registerIndexProvider(new OpenAlexIndexProvider(async (url, signal) =>
-    fromWeb(await ctx.web.fetch({ url }, signal))))
+    fromWeb(await ctx.web.fetch({ url }, signal)), mailto === undefined || mailto.length === 0 ? undefined : mailto))
 }
