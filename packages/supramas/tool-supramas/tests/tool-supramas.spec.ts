@@ -356,6 +356,154 @@ describe('dsh-tool-supramas', () => {
     expect(disposeReviewer).toHaveBeenCalledOnce()
   })
 
+  it('does not step past the most relevant imported paper after an infrastructure failure', async () => {
+    const ctx = await setup(false)
+    await ctx.plugin(ToolSupraMas, { mode: 'orchestrated', subagentProvider: 'attested' })
+    const created = await ctx.supramas.create({
+      jobId: 'infra-step',
+      inputTaskPath: 'runs/infra-step/input_task.yaml',
+      runDir: 'runs/infra-step',
+    })
+    const ready = await ctx.supramas.transition(created, { phase: 'task_ready' })
+
+    const rootText = 'Single-target BZO pinning improves in-field Jc but cannot provide isotropic pinning and high-field c-axis pinning simultaneously.'
+    const papers = [
+      {
+        paper_id: 'paper-root',
+        paper_title: 'Single-target BZO pinning paper',
+        sha256: 'c'.repeat(64),
+        chunk_id: 'paper-root-c1',
+        text: rootText,
+      },
+      {
+        paper_id: 'paper-isotropic',
+        paper_title: 'Towards isotropic vortex pinning in YBCO films with double-doped artificial pinning centers',
+        sha256: 'd'.repeat(64),
+        chunk_id: 'paper-isotropic-c1',
+        text: 'Double-doped BHO and Y2O3 pinning centers raise the isotropic Jc.',
+      },
+      {
+        paper_id: 'paper-coated',
+        paper_title: 'All-chemical coated conductors with performed substrates',
+        sha256: 'e'.repeat(64),
+        chunk_id: 'paper-coated-c1',
+        text: 'Coated conductor substrate chemistry.',
+      },
+    ] as const
+    for (const paper of papers) {
+      await ctx.supramas.storePaper(ready.id, {
+        paper_id: paper.paper_id,
+        paper_title: paper.paper_title,
+        local_path: `runs/infra-step/papers/${paper.paper_id}.json`,
+        source_type: 'experimental',
+        full_text_source: {
+          local_path: `runs/infra-step/papers/raw/${paper.paper_id}.pdf`,
+          media_type: 'application/pdf',
+          sha256: paper.sha256,
+          byte_length: 1_024,
+          page_count: 1,
+        },
+      })
+      await ctx.supramas.addEvidenceChunk(ready.id, paper.paper_id, {
+        chunk_id: paper.chunk_id,
+        page: 1,
+        text: paper.text,
+        evidence_kind: 'full_text',
+      })
+    }
+
+    const started = await call(ctx, 'supramas_stage1_start', {
+      run_id: ready.id,
+      revision: ready.revision,
+      research_topic: 'REBCO isotropic flux pinning',
+      max_depth: 1,
+      max_root_attempts: 3,
+      max_child_attempts_per_limitation: 3,
+    })
+    expect(started.isError).toBe(false)
+
+    const rootBuilt = await ctx.supramas.submitStage1Builder(
+      { id: ready.id, revision: ready.revision + 1 },
+      {
+        builder_run_id: 'setup-builder',
+        paper_node: {
+          paper_id: 'paper-root',
+          paper_title: 'Single-target BZO pinning paper',
+          source_type: 'experimental',
+          strategy_records: [{
+            record_id: 'R1',
+            tuning_dimension: 'Composition tuning',
+            tuning_strategy: 'Add single-target BZO nanorods.',
+            tuning_effect: 'Single-target BZO pinning improves in-field Jc.',
+            evidence: { chunk_id: 'paper-root-c1', page: 1, evidence_text: 'Single-target BZO pinning improves in-field Jc' },
+            confidence: 0.9,
+          }],
+          limitation_records: [{
+            limitation_id: 'L1',
+            limitation: 'Single-target pinning cannot provide isotropic pinning and high-field c-axis pinning simultaneously.',
+            expectation: 'Combine isotropic and c-axis correlated pinning through double-doped artificial pinning centers.',
+            evidence: { chunk_id: 'paper-root-c1', page: 1, evidence_text: 'cannot provide isotropic pinning and high-field c-axis pinning simultaneously' },
+            confidence: 0.9,
+          }],
+        },
+        edge: null,
+        notes: [],
+      },
+    )
+    const rootAccepted = await ctx.supramas.submitStage1Review(
+      { id: ready.id, revision: rootBuilt.run.revision },
+      {
+        reviewer_run_id: 'setup-reviewer',
+        decision: 'accept',
+        expectation_satisfaction: 'not_applicable',
+        summary: 'Root accepted.',
+        critical_issues: [],
+        edge_issues: [],
+        acceptance_conditions: [],
+      },
+    )
+    const afterInfra = await ctx.supramas.submitStage1Builder(
+      { id: ready.id, revision: rootAccepted.run.revision },
+      {
+        builder_run_id: 'setup-builder-infra',
+        paper_node: null,
+        edge: null,
+        reason: 'All mirrors returned HTTP 403.',
+        notes: [],
+        infrastructure: true,
+      },
+    )
+    const infraAttempt = afterInfra.workflow.builder_attempts.at(-1)
+    if (infraAttempt === undefined) throw new Error('expected the infrastructure attempt')
+    expect(infraAttempt).toMatchObject({ status: 'no_candidate_infrastructure' })
+    expect(afterInfra.workflow.frontiers[0]).toMatchObject({ key: 'N0:L1', status: 'pending' })
+
+    const start = vi.fn<(provider: string, request: SubagentStartRequest) => Promise<unknown>>()
+      .mockResolvedValueOnce({
+        id: 'builder-run-infra-step',
+        result: Promise.resolve({
+          stopReason: 'completed',
+          output: [],
+          structured: { paper_node: null, edge: null, reason: 'No supported candidate.', notes: [] },
+        }),
+        dispose: vi.fn(),
+      })
+    ctx.provide('subagents', { start } as never)
+
+    const submitted = await call(ctx, 'supramas_stage1_builder_submit', {
+      run_id: ready.id,
+      revision: afterInfra.run.revision,
+    }, fakeAgent())
+    expect(submitted.isError).toBe(false)
+    const builderRequest = start.mock.calls[0]?.[1]
+    if (builderRequest === undefined) throw new Error('expected builder subagent request')
+    expect(JSON.stringify(builderRequest.prompt)).toContain('paper-isotropic')
+    expect(JSON.stringify(builderRequest.prompt)).not.toContain('paper-coated')
+    const builderToolFilter = builderRequest.toolFilter
+    if (builderToolFilter === undefined) throw new Error('expected builder tool filter')
+    expect(builderToolFilter.allow).not.toContain('supramas_paper_import')
+  })
+
   it('allows one same-process retry, then latches a failed atomic handoff at the exact revision', async () => {
     const ctx = await setup(false)
     await ctx.plugin(ToolSupraMas, { mode: 'orchestrated', subagentProvider: 'attested' })

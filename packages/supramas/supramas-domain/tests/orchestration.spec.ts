@@ -473,7 +473,6 @@ describe('Stage 1 builder/reviewer orchestration', () => {
       scope: 'root', status: 'no_candidate', reason: 'builder returned no candidate',
     }])
     expect(nextStage1Action(firstMiss)).toMatchObject({ kind: 'build_root', attempt_index: 2 })
-
     const workflow = configured({ maxRootAttempts: 1 })
     const built = submitStage1Builder(workflow, { paper_node: rootDraft(), edge: null, notes: [] }, catalog)
     expect(() => submitStage1Review(built, { ...review('accept'), decision: 'invalid' as never }, catalog))
@@ -605,6 +604,79 @@ describe('Stage 1 builder/reviewer orchestration', () => {
       { scope: 'child', status: 'no_edge_proposed', reason: 'builder returned no proposed edge' },
     ])
     expect(nextStage1Action(exhausted)).toEqual({ kind: 'finalize' })
+  })
+
+  it('records environmental acquisition failures without consuming the attempt budget', () => {
+    const catalog = evidence()
+    const root = acceptedRoot(catalog, configured({ maxChildAttemptsPerLimitation: 1 }))
+    const miss = submitStage1Builder(root, {
+      paper_node: null,
+      edge: null,
+      reason: 'All mirrors failed: HTTP 403, timeout, and a non-PDF body.',
+      notes: [],
+      infrastructure: true,
+    }, catalog)
+    expect(miss.builder_attempts).toMatchObject([
+      { scope: 'root', status: 'accepted' },
+      {
+        scope: 'child',
+        status: 'no_candidate_infrastructure',
+        reason: 'All mirrors failed: HTTP 403, timeout, and a non-PDF body.',
+      },
+    ])
+    expect(miss.frontiers[0]).toMatchObject({ status: 'pending', attempts: 1 })
+    expect(nextStage1Action(miss)).toMatchObject({ kind: 'build_child', attempt_index: 2 })
+    expect(validateStage1Workflow(miss, catalog)).toMatchObject({ status: 'active' })
+
+    const secondMiss = submitStage1Builder(miss, {
+      paper_node: null,
+      edge: null,
+      reason: 'Retried the remaining mirrors; every download timed out.',
+      notes: [],
+      infrastructure: true,
+    }, catalog)
+    expect(secondMiss.frontiers[0]).toMatchObject({ status: 'pending', attempts: 2 })
+    expect(nextStage1Action(secondMiss)).toMatchObject({ kind: 'build_child', attempt_index: 3 })
+
+    const scientificMiss = submitStage1Builder(secondMiss, {
+      paper_node: null,
+      edge: null,
+      reason: 'No supported full-text candidate for this expectation.',
+      notes: [],
+    }, catalog)
+    expect(scientificMiss.builder_attempts).toMatchObject([
+      { scope: 'root', status: 'accepted' },
+      { scope: 'child', status: 'no_candidate_infrastructure' },
+      { scope: 'child', status: 'no_candidate_infrastructure' },
+      { scope: 'child', status: 'no_candidate' },
+    ])
+    expect(scientificMiss.frontiers[0]).toMatchObject({ status: 'no_supported_child_after_attempt_budget', attempts: 3 })
+    expect(nextStage1Action(scientificMiss)).toEqual({ kind: 'finalize' })
+  })
+
+  it('does not fail a root workflow while every miss is environmental', () => {
+    const catalog = evidence()
+    const workflow = configured({ maxRootAttempts: 1 })
+    const miss = submitStage1Builder(workflow, {
+      paper_node: null,
+      edge: null,
+      reason: 'Publisher and repository mirrors all returned HTTP 403.',
+      notes: [],
+      infrastructure: true,
+    }, catalog)
+    expect(miss.status).toBe('active')
+    expect(nextStage1Action(miss)).toMatchObject({ kind: 'build_root', attempt_index: 2 })
+
+    const scientificMiss = submitStage1Builder(miss, {
+      paper_node: null,
+      edge: null,
+      reason: 'No supported full-text candidate exists for the topic.',
+      notes: [],
+    }, catalog)
+    expect(scientificMiss.status).toBe('failed')
+    expect(nextStage1Action(scientificMiss)).toEqual({
+      kind: 'failed', reason: 'no_supported_root_after_attempt_budget',
+    })
   })
 
   it('applies target and parent-width caps without overwriting terminal frontiers', () => {

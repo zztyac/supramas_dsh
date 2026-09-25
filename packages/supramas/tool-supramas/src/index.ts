@@ -427,6 +427,11 @@ const builderHandoffSchema = {
       description: 'Complete child bridge, or null for a root or unsupported bridge.',
     },
     reason: { type: 'string', description: 'Evidence-based explanation for a null candidate or edge.' },
+    infrastructure: {
+      type: 'boolean',
+      description:
+        'True only when a null candidate is an environmental acquisition failure (403, timeout, non-PDF body, blocked mirror) rather than a scientific no-candidate verdict. Requires paper_node null and a precise reason.',
+    },
     notes: { type: 'array', required: true, items: { type: 'string' } },
   },
 } as const satisfies ValueSchemaSpec
@@ -453,7 +458,9 @@ build_root, build_child, or revise_candidate action from the supplied durable st
 available_imported_papers is non-empty, choose exactly one listed paper, do not search or import, and read
 only the bounded chunks needed for the result. When it is empty, make at most two web searches, three
 structured literature searches, and six import attempts, then stop discovery after the first supported
-full-text candidate. If an indexed PDF returns 403, times out, or is not a PDF, use web_search with the
+full-text candidate. If an indexed PDF returns 403, times out, or is not a PDF, first retry the same
+candidate once: every candidate may expose multiple ordered document URLs, so try the remaining mirrors
+through supramas_paper_import before abandoning it. If all mirrors fail, use web_search with the
 candidate DOI or exact title to find a direct public PDF and retry supramas_paper_import for the same
 candidate with document_url. Search
 abstracts are discovery metadata and must never be cited. Every evidence_text must be a literal substring
@@ -463,7 +470,14 @@ the record. Before returning, call supramas_evidence_verify for every proposed e
 any mismatch against supramas_chunk_read; never return an unverified quote. Always copy
 verification.canonical_evidence_text into the record, especially when match_kind is normalized. Attempt exact-character repair
 at most twice per quote, use at most twelve chunk reads and twelve evidence verifications for one handoff,
-and return a null paper_node with a precise reason instead of continuing a repeated verification loop. On revision,
+and return a null paper_node with a precise reason instead of continuing a repeated verification loop. Set
+infrastructure true in the result only when the null paper_node is caused by environmental acquisition
+failures (HTTP 403 or timeout, blocked redirects, non-PDF bodies, no importable mirror after the retries
+above); set it false or omit it when the literature genuinely lacks a supported candidate for the request.
+Copy paper_id and paper_title verbatim from the imported paper artifact or its available_imported_papers
+entry; never compose, truncate, or restyle the title from search-result metadata, because the coordinator
+rejects any title that differs from the stored local paper.
+On revision,
 keep the same paper and address every reviewer condition. Never review, accept, submit workflow state, or
 assemble a tree. Finish promptly with exactly one structured result matching the required schema; use null
 paper_node when no supported full-text candidate exists and null edge for a root or unsupported child bridge.
@@ -717,8 +731,12 @@ function availableBuilderPapers(state: Stage1RunState, papers: PaperArtifact[]):
   const frontierKey = state.nextAction.kind === 'build_child'
     ? `${state.nextAction.parent_node_id}:${state.nextAction.parent_limitation_id}`
     : undefined
+  // Step past one ranked paper per prior scientific no-candidate attempt: that attempt
+  // evaluated the offered paper and rejected it. Infrastructure failures never evaluated
+  // any paper, so they must not advance the selection.
   const priorEmptyAttempts = state.workflow.builder_attempts.filter(attempt =>
     attempt.paper_id === undefined
+    && attempt.status !== 'no_candidate_infrastructure'
     && (frontierKey === undefined ? attempt.scope === 'root' : attempt.frontier_key === frontierKey),
   ).length
   const selected = ranked[priorEmptyAttempts] ?? ranked[0]
@@ -1026,6 +1044,10 @@ export function apply(ctx: Context, config: Config): void {
           description: 'Complete proposed child edge; omit for a root or unsupported child bridge.',
         },
         reason: { type: 'string', description: 'Evidence-based reason for an empty candidate or edge.' },
+        infrastructure: {
+          type: 'boolean',
+          description: 'True only for an environmental acquisition failure behind a null candidate.',
+        },
         notes: { type: 'array', items: { type: 'string' }, description: 'Concise builder handoff notes.' },
       },
       output,
@@ -1037,6 +1059,7 @@ export function apply(ctx: Context, config: Config): void {
               paper_node: args.paper_node === undefined ? null : args.paper_node,
               edge: args.edge === undefined ? null : args.edge,
               ...(args.reason === undefined ? {} : { reason: args.reason }),
+              ...(args.infrastructure === undefined ? {} : { infrastructure: args.infrastructure }),
               notes: args.notes ?? [],
             },
           )

@@ -56,6 +56,12 @@ export interface Stage1BuilderSubmission {
   edge: ProposedStrategyEdge | null
   reason?: string
   notes: string[]
+  /**
+   * True when the null candidate is an environmental acquisition failure (download blocked,
+   * timeout, non-PDF body) rather than a scientific no-supported-candidate verdict. Such
+   * attempts are recorded but do not consume the root or per-limitation attempt budget.
+   */
+  infrastructure?: boolean
 }
 
 /** Immutable limits and research scope controlling one Stage 1 workflow. */
@@ -101,6 +107,7 @@ export type Stage1BuilderAttemptStatus =
   | 'accepted'
   | 'rejected'
   | 'no_candidate'
+  | 'no_candidate_infrastructure'
   | 'no_edge_proposed'
 
 /** Durable account of one real literature-search attempt. */
@@ -265,6 +272,16 @@ function rootAttempts(workflow: Stage1Workflow): Stage1BuilderAttempt[] {
 
 function attemptsFor(workflow: Stage1Workflow, key: string): Stage1BuilderAttempt[] {
   return workflow.builder_attempts.filter(attempt => attempt.frontier_key === key)
+}
+
+/** Attempt outcomes that consumed real scientific search effort and therefore budget. */
+function countsTowardBudget(attempt: Stage1BuilderAttempt): boolean {
+  return attempt.status !== 'no_candidate_infrastructure'
+}
+
+/** Scientific attempt counts used by root/frontier budget exhaustion. */
+function scientificAttempts(attempts: readonly Stage1BuilderAttempt[]): number {
+  return attempts.filter(countsTowardBudget).length
 }
 
 function validateFinding(finding: Stage1ReviewFinding, path: string): Stage1ReviewFinding {
@@ -497,7 +514,7 @@ function setReadyWhenClosed(workflow: Stage1Workflow): void {
 
 function exhaustCurrent(workflow: Stage1Workflow, scope: 'root' | 'child', frontierKey?: string): void {
   if (scope === 'root') {
-    if (rootAttempts(workflow).length >= workflow.config.maxRootAttempts) {
+    if (scientificAttempts(rootAttempts(workflow)) >= workflow.config.maxRootAttempts) {
       workflow.status = 'failed'
       workflow.failure = 'no_supported_root_after_attempt_budget'
     }
@@ -506,7 +523,7 @@ function exhaustCurrent(workflow: Stage1Workflow, scope: 'root' | 'child', front
   /* v8 ignore next -- child scope is selected only from a build_child action carrying its frontier key. */
   if (frontierKey === undefined) fail('child attempt has no frontier key')
   const frontier = frontierByKey(workflow, frontierKey)
-  if (frontier.attempts >= workflow.config.maxChildAttemptsPerLimitation) {
+  if (scientificAttempts(attemptsFor(workflow, frontierKey)) >= workflow.config.maxChildAttemptsPerLimitation) {
     frontier.status = 'no_supported_child_after_attempt_budget'
     frontier.reason = 'Every configured builder attempt completed without an accepted child edge.'
   }
@@ -699,11 +716,11 @@ export function submitStage1Builder(
       scope,
       ...(frontierKey === undefined ? {} : { frontier_key: frontierKey }),
       revision_round: 0,
-      status: 'no_candidate',
+      status: submission.infrastructure === true ? 'no_candidate_infrastructure' : 'no_candidate',
       ...(builderRunId === undefined ? {} : { builder_run_id: builderRunId }),
       reason: nonempty(submission.reason ?? 'builder returned no candidate', 'builder.reason'),
     })
-    exhaustCurrent(updated, scope, frontierKey)
+    if (submission.infrastructure !== true) exhaustCurrent(updated, scope, frontierKey)
     return updated
   }
 
